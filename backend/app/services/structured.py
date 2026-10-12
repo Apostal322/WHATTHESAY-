@@ -43,22 +43,30 @@ def clip(text: str | None, limit: int) -> str | None:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def to_token_usage(usage: Usage, settings: Settings) -> TokenUsage:
+def to_token_usage(usage: Usage, settings: Settings, search_queries: int = 0) -> TokenUsage:
+    """Token usage plus an optional cost estimate.
+
+    The estimate covers tokens and, when priced, executed grounding searches.
+    Free-tier search allowances are not modelled.
+    """
     cost: float | None = None
     if (
         settings.price_input_per_million is not None
         and settings.price_output_per_million is not None
     ):
-        cost = round(
+        cost = (
             usage.prompt_tokens / 1e6 * settings.price_input_per_million
-            + usage.output_tokens / 1e6 * settings.price_output_per_million,
-            6,
+            + usage.output_tokens / 1e6 * settings.price_output_per_million
         )
+        if search_queries and settings.price_per_1k_search_queries is not None:
+            cost += search_queries / 1000 * settings.price_per_1k_search_queries
+        cost = round(cost, 6)
     return TokenUsage(
         prompt_tokens=usage.prompt_tokens,
         output_tokens=usage.output_tokens,
         total_tokens=usage.total_tokens,
         video_tokens=usage.video_tokens,
         audio_tokens=usage.audio_tokens,
+        search_queries=search_queries,
         estimated_cost_usd=cost,
     )

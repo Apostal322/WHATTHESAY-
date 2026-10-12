@@ -4,7 +4,7 @@ import type { VideoContextSource } from "../src/sidepanel/videoSource";
 
 export const VIDEO_ID = "dQw4w9WgXcQ";
 
-const usage = { prompt_tokens: 1, output_tokens: 1, total_tokens: 2, video_tokens: null, audio_tokens: null, estimated_cost_usd: null };
+const usage = { prompt_tokens: 1, output_tokens: 1, total_tokens: 2, video_tokens: null, audio_tokens: null, search_queries: 0, estimated_cost_usd: null };
 
 export function extraction(overrides: Partial<ExtractResponse> = {}): ExtractResponse {
   return {

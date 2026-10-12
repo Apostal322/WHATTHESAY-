@@ -12,6 +12,7 @@ export interface TokenUsage {
   total_tokens: number;
   video_tokens: number | null;
   audio_tokens: number | null;
+  search_queries: number;
   estimated_cost_usd: number | null;
 }
 

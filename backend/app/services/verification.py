@@ -144,14 +144,15 @@ class VerificationService:
             normalized
         ]
 
-        def finish(**kw: object) -> VerifyResponse:
+        def finish(*, search_queries: list[str], **kw: object) -> VerifyResponse:
             resp = VerifyResponse(
                 claim=req.claim,
                 normalized_claim=normalized,
                 claim_type=analysis.claim_type,
                 model=model,
                 latency_ms=int((time.perf_counter() - started) * 1000),
-                usage=to_token_usage(usage, s),
+                usage=to_token_usage(usage, s, len(search_queries)),
+                search_queries=search_queries,
                 **kw,
             )
             log.info(
@@ -199,7 +200,8 @@ class VerificationService:
         if candidates and self._http is not None and s.resolve_source_redirects:
             await resolve_redirects(candidates, self._http)
         sources = dedupe_and_number(candidates)
-        search_queries = grounded.queries or queries
+        # Only queries Google reports as executed: these are what grounding bills.
+        executed_queries = list(grounded.queries)
 
         if not sources:
             return finish(
@@ -215,7 +217,7 @@ class VerificationService:
                     if grounded.raw_metadata_present
                     else "The search step returned no grounding metadata."
                 ],
-                search_queries=search_queries,
+                search_queries=executed_queries,
                 independent_source_count=0,
                 guardrail_notes=["No verdict was generated without retrieved evidence."],
             )
@@ -291,7 +293,7 @@ class VerificationService:
             key_findings=findings,
             sources=refs,
             limitations=limitations,
-            search_queries=search_queries,
+            search_queries=executed_queries,
             independent_source_count=independent_domains(stances, by_id),
             guardrail_notes=notes,
         )

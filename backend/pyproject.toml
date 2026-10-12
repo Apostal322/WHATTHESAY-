@@ -54,3 +54,4 @@ ignore_missing_imports = true
 "app/services/prompts.py" = ["E501"]  # natural-language prompt templates
 "tests/*" = ["E501"]
 "../scripts/*" = ["E402"]
+"../scripts/live_validation.py" = ["E402", "E501"]  # markdown table templates

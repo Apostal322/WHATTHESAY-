@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     price_output_per_million: float | None = Field(
         default=None, ge=0, alias="YOUVERIFY_PRICE_OUTPUT_PER_M"
     )
+    # Google Search grounding on Gemini 3 is billed per executed search query.
+    price_per_1k_search_queries: float | None = Field(
+        default=None, ge=0, alias="YOUVERIFY_PRICE_PER_1K_SEARCHES"
+    )
 
     log_level: str = Field(default="INFO", alias="YOUVERIFY_LOG_LEVEL")
 

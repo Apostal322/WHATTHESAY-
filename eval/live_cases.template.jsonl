@@ -1,0 +1,3 @@
+{"id": "en-1", "youtube_url": "https://www.youtube.com/watch?v=REPLACE_VIDEO_ID", "timestamp_sec": 0, "language": "en", "duration_sec": null, "ground_truth_claim": "REPLACE with the exact words you heard just before timestamp_sec", "verified_by": "REPLACE name, date", "reference_verdict": null}
+{"id": "en-2", "youtube_url": "https://www.youtube.com/watch?v=REPLACE_VIDEO_ID", "timestamp_sec": 0, "language": "en", "duration_sec": null, "ground_truth_claim": "REPLACE", "verified_by": "REPLACE", "reference_verdict": null}
+{"id": "ru-1", "youtube_url": "https://www.youtube.com/watch?v=REPLACE_VIDEO_ID", "timestamp_sec": 0, "language": "ru", "duration_sec": null, "ground_truth_claim": "REPLACE", "verified_by": "REPLACE", "reference_verdict": null}

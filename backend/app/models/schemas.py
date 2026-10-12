@@ -27,6 +27,7 @@ class TokenUsage(BaseModel):
     total_tokens: int = 0
     video_tokens: int | None = None
     audio_tokens: int | None = None
+    search_queries: int = Field(default=0, description="Executed grounding searches (billed).")
     estimated_cost_usd: float | None = Field(
         default=None,
         description="Only set when prices are configured; an estimate, not a bill.",

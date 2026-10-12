@@ -27,3 +27,6 @@ eval/runs/
 Thumbs.db
 .idea/
 .vscode/
+
+# Live browser test output
+extension/e2e-live-out/

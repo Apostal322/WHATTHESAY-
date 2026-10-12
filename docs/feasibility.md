@@ -78,19 +78,42 @@ response. If you set `YOUVERIFY_PRICE_INPUT_PER_M` / `YOUVERIFY_PRICE_OUTPUT_PER
 from the current [pricing page](https://ai.google.dev/gemini-api/docs/pricing),
 each response also includes `estimated_cost_usd`.
 
-Rough expectation for one extraction, using previously published per-frame and
-per-second token rates. Treat these as an order of magnitude only and confirm
-with the PoC:
+Rough expectation for one extraction. Treat this as an estimate to confirm
+with the PoC or `scripts/live_validation.py`:
 
-- 55 s clip × 0.5 fps ≈ 28 frames at low resolution: on the order of 2k tokens
-- audio: on the order of 30 tokens/s, so ≈ 1.7k tokens
+- 55 s clip × 0.5 fps ≈ 28 frames × **70 tokens/frame** (Gemini 3 `low`/`medium`
+  video resolution per the media-resolution docs; `high` is 280) ≈ 1.9k tokens
+- audio: assumed ≈ 32 tokens/s (an earlier published rate, not re-confirmed for
+  Gemini 3), so ≈ 1.8k tokens
 - prompt and output: under 1k tokens
 - **≈ 4–5k input tokens per extraction**, if clipping is honoured. If clipping is
   ignored, multiply by (video length / 55 s).
 
 A verification makes three model calls (claim analysis, grounded search, evaluation),
-typically a few thousand tokens in total. **Google Search grounding is billed
-separately** under its own pricing; check the current rate for your model.
+typically a few thousand tokens in total. **On Gemini 3, Google Search grounding is billed per
+executed search query**, not per prompt. Google Cloud's pricing page lists 5,000 free queries
+a month, then $14 per 1,000. Since 2026-10 the backend reports executed queries in
+`usage.search_queries` and adds them to `estimated_cost_usd` when
+`YOUVERIFY_PRICE_PER_1K_SEARCHES` is set. Third-party listings give
+`gemini-3.8-flash` at $0.75 / $3.75 per 1M input/output tokens (introductory,
+until 2026-12-31). Confirm on Google's pricing page before relying on it.
+
+## Docs audit (2026-10)
+
+- `generateContent` remains supported. **Clipping (`video_metadata`) is
+  generateContent-only**; the Interactions API does not support it yet. Our
+  integration therefore stays on `generate_content`.
+- **Agentic video processing** (Interactions API, `processing: "agentic"`; listed for
+  Gemini 3.8 Flash, 3.6 Flash and 3.5 Flash-Lite) lets the model navigate the timeline
+  itself. Clip offsets and fps do not apply to it. It is the candidate fallback **if**
+  static clipping turns out to be ignored for YouTube URLs.
+- **Clipping risk is real:** a public report
+  ([dzivkovi/video-intel#141](https://github.com/dzivkovi/video-intel/issues/141))
+  observed `start_offset`/`end_offset` being ignored for a YouTube URL on
+  `gemini-3.7-flash`: the whole video was returned with timestamps shifted by the
+  offset. The same project's production chunking saw ~1.0× cost and no
+  out-of-window timestamps, so the behaviour may be intermittent. Only our own
+  live measurement settles it for `gemini-3.8-flash`.
 
 ## Known limitations
 

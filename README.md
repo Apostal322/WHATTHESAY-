@@ -23,7 +23,7 @@ settle the claim, it says so.
 - [Development](#development)
 - [Known limitations](#known-limitations)
 - [Future ML improvements](#future-ml-improvements)
-- Docs: [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
+- Docs: [live validation report](docs/live-validation-report.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
 
 ## How it works
 
@@ -72,13 +72,13 @@ No numerical confidence is shown, because model self-reported confidence is not 
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 99 unit/integration tests with a fake LLM |
-| Gemini request wire format (YouTube clip, schema, search tool) and response parsing | ✅ Verified against a mocked HTTP transport using the real SDK (google-genai 2.29) |
+| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 108 unit/integration tests with a fake LLM |
+| Gemini request wire format (YouTube clip, schema, search tool) and response parsing | ✅ Verified against a mocked HTTP transport using the real SDK (google-genai 2.29) and audited against current docs ([report](docs/live-validation-report.md)) |
 | Chrome extension (MV3, side panel, content script, background) | ✅ Implemented; 35 component/unit tests; builds to `extension/dist` |
 | End-to-end UI ↔ backend in a real Chromium | ✅ Automated smoke test (`npm run e2e`). Uses a **fixture YouTube page** and a **scripted fake model** |
-| **Live Gemini extraction and verification** | ⚠️ **Not yet run.** No API key was available during development. Run `scripts/poc_extract_claim.py` first |
-| **Live youtube.com page in Chrome** | ⚠️ **Not yet tested by hand.** YouTube was unreachable from the dev sandbox; the content script was exercised on a fixture page |
-| Accuracy, latency and cost benchmarks | ⚠️ Not measured. Protocol and tooling are ready ([docs/evaluation.md](docs/evaluation.md)) |
+| **Live Gemini extraction, clipping and verification** | ⚠️ **Not yet run** (no API key available). One command runs it all: `scripts/live_validation.py` |
+| **Live youtube.com page in Chrome** | ⚠️ **Not yet run** (YouTube blocked in the dev sandbox). Script: `npm run e2e:live` |
+| Accuracy, latency and cost benchmarks | ⚠️ Not measured. See [live validation report](docs/live-validation-report.md) for blockers and commands |
 
 ## Setup (Windows)
 
@@ -136,7 +136,14 @@ cd extension && npm ci && npm run build   # then load extension/dist as above
 
 ## Testing the full user flow
 
-1. **Validate extraction first** (the riskiest part):
+0. **Run the live validation harness** (preflight, extraction against your
+   human-verified moments, 20 s vs 50 s clipping, verification, cited-page screening):
+   ```bash
+   cp eval/live_cases.template.jsonl eval/live_cases.jsonl   # fill in real moments
+   python scripts/live_validation.py eval/live_cases.jsonl --fetch-sources
+   ```
+   See [docs/live-validation-report.md](docs/live-validation-report.md).
+1. **Or validate extraction on its own** (the riskiest part):
    ```bash
    python scripts/poc_extract_claim.py --url "https://www.youtube.com/watch?v=VIDEO_ID" --timestamp 755
    python scripts/poc_extract_claim.py --url "https://www.youtube.com/watch?v=VIDEO_ID" --timestamp 755 --probe-clipping
@@ -217,7 +224,7 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 
 ```bash
 # backend (from backend/)
-pytest                    # 99 tests, no network, no key
+pytest                    # 108 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 
@@ -245,7 +252,7 @@ extension/src/
   sidepanel/    App, hooks, Chrome bridge, styles
   components/   ClaimEditor, VerdictCard, SourceList, …
   shared/       API client, state machine, types, formatting
-scripts/        poc_extract_claim.py, list_models.py, run_eval.py, make_icons.py
+scripts/        poc_extract_claim.py, live_validation.py, list_models.py, run_eval.py, make_icons.py
 eval/           dataset.example.jsonl (runs/ is git-ignored)
 docs/           feasibility, evaluation, security & privacy
 ```

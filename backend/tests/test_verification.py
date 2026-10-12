@@ -227,3 +227,32 @@ def test_verify_request_validation() -> None:
         VerifyRequest(claim="!!!!!!!!")
     with pytest.raises(ValueError):
         VerifyRequest(claim="x" * 1001)
+
+
+async def test_cost_includes_executed_search_queries(settings: Settings) -> None:
+    priced = settings.model_copy(
+        update={
+            "price_input_per_million": 1.0,
+            "price_output_per_million": 2.0,
+            "price_per_1k_search_queries": 14.0,
+        }
+    )
+    llm = FakeLLM(
+        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL},
+        grounded=make_grounded(chunks=[], supports=[], queries=["q1", "q2"]),
+    )
+    resp = await _service(llm, priced).verify(VerifyRequest(claim=CLAIM))
+    assert resp.search_queries == ["q1", "q2"]
+    assert resp.usage.search_queries == 2
+    # tokens: (100+300) in, (20+200) out; searches: 2 x $0.014
+    expected = 400 / 1e6 * 1.0 + 220 / 1e6 * 2.0 + 2 * 0.014
+    assert resp.usage.estimated_cost_usd == round(expected, 6)
+
+
+async def test_planned_queries_are_not_reported_as_executed(settings: Settings) -> None:
+    grounded = make_grounded(chunks=[], supports=[])
+    grounded = type(grounded)(**{**grounded.__dict__, "queries": []})
+    llm = FakeLLM(json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL}, grounded=grounded)
+    resp = await _service(llm, settings).verify(VerifyRequest(claim=CLAIM))
+    assert resp.search_queries == []
+    assert resp.usage.search_queries == 0
