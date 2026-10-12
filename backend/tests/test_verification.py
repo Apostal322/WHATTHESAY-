@@ -214,7 +214,10 @@ def test_guardrail_flags_single_domain_and_conflicts() -> None:
 
 
 def test_strip_unknown_citations() -> None:
-    assert strip_unknown_citations("A [S1] B [S3] C", {"S1"}) == "A [S1] B  C"
+    assert strip_unknown_citations("A [S1] B [S3] C", {"S1"}) == "A [S1] B C"
+    assert (
+        strip_unknown_citations("Growth [S1], not loss [S9].", {"S1"}) == "Growth [S1], not loss."
+    )
 
 
 def test_verify_request_validation() -> None:

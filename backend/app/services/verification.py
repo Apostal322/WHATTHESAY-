@@ -41,6 +41,7 @@ ProgressCallback = Callable[[Stage], Awaitable[None]]
 
 NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
+_SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 
 
 async def _noop(_: Stage) -> None:
@@ -89,7 +90,8 @@ def apply_verdict_guardrails(
 
 
 def strip_unknown_citations(text: str, known: set[str]) -> str:
-    return _CITATION_RE.sub(lambda m: m.group(0) if m.group(1) in known else "", text).strip()
+    stripped = _CITATION_RE.sub(lambda m: m.group(0) if m.group(1) in known else "", text)
+    return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", re.sub(r" {2,}", " ", stripped)).strip()
 
 
 def independent_domains(stances: dict[str, Stance], sources: dict[str, EvidenceSource]) -> int:
