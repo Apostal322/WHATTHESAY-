@@ -34,6 +34,7 @@ sys.path.insert(0, str(REPO / "backend"))
 
 import httpx
 
+from app.api.deps import build_search_retriever
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging
@@ -53,6 +54,7 @@ from app.services.citations import is_safe_display_url
 from app.services.extraction import ExtractionService
 from app.services.llm import GeminiClient, LLMClient, Usage, VideoClip
 from app.services.prompts import EXTRACTION_SYSTEM, extraction_prompt
+from app.services.retrieval import Retriever
 from app.services.structured import parse_model_json, to_token_usage
 from app.services.verification import VerificationService
 from app.services.youtube import canonical_watch_url, parse_video_id
@@ -233,7 +235,9 @@ async def run_case(
     settings: Settings,
     http: httpx.AsyncClient,
     args: argparse.Namespace,
+    retriever: Retriever | None = None,
 ) -> dict[str, Any]:
+    """`retriever` None = Gemini grounding (the VerificationService default)."""
     out: dict[str, Any] = {"case": case.model_dump()}
     stages = (
         ("extraction", lambda: run_extraction(case, ExtractionService(llm, settings))),
@@ -259,7 +263,7 @@ async def run_case(
             out["verification"] = await run_verification(
                 case,
                 claim,
-                VerificationService(llm, settings, http),
+                VerificationService(llm, settings, http, retriever=retriever),
                 http if args.fetch_sources else None,
                 context,
             )
@@ -291,6 +295,7 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
         f"- Run: {meta['run_at']}",
         f"- Extraction model: `{meta['extraction_model']}` · verification model: `{meta['verification_model']}`",
         f"- Window defaults: {meta['window']} · fps {meta['fps']} · media resolution {meta['resolution']}",
+        f"- Retrieval: {meta.get('retrieval', 'gemini_grounding')}",
         f"- Prices (USD): {meta['prices']}",
         f"- Model preflight: {meta['preflight']}",
         "",
@@ -452,9 +457,15 @@ async def run_all(
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(15.0), headers={"User-Agent": "YouVerify-validation/0.1"}
     ) as http:
+        # Built once per run, like the API, so a search budget spans the whole run.
+        retriever = (
+            build_search_retriever(settings, http)
+            if settings.retrieval_backend == "search"
+            else None
+        )
         for case in cases:
             print(f"[{case.id}] running…", file=sys.stderr)
-            results.append(await run_case(case, llm, settings, http, args))
+            results.append(await run_case(case, llm, settings, http, args, retriever))
     return results
 
 
@@ -527,6 +538,8 @@ def main() -> int:
         "extraction_model": settings.extraction_model,
         "verification_model": settings.verification_model,
         "window": f"-{settings.window_before_sec}s/+{settings.window_after_sec}s",
+        "retrieval": settings.retrieval_backend
+        + (f" ({settings.search_providers})" if settings.retrieval_backend == "search" else ""),
         "fps": settings.video_fps,
         "resolution": settings.video_media_resolution,
         "prices": {

@@ -1,5 +1,6 @@
 """Search providers against a mocked HTTP transport, and failover behaviour."""
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -12,6 +13,7 @@ from app.services.search import (
     SearchProviderError,
     SearchResponse,
     SearxngProvider,
+    SpendGuard,
 )
 
 SEARX_BODY = {
@@ -181,3 +183,36 @@ async def test_all_providers_failing_returns_no_response() -> None:
 def test_failover_requires_a_provider() -> None:
     with pytest.raises(ValueError):
         FailoverSearch([])
+
+
+# ---------------------------------------------------------------- spending cap
+
+
+def test_spend_guard_caps_refunds_and_resets_daily() -> None:
+    now = [datetime(2026, 10, 13, 23, 0, tzinfo=UTC)]
+    guard = SpendGuard(0.01, now=lambda: now[0])
+    assert guard.try_reserve(0.005) and guard.try_reserve(0.005)
+    assert not guard.try_reserve(0.005)
+    guard.refund(0.005)
+    assert guard.try_reserve(0.005)
+    now[0] += timedelta(hours=2)  # next UTC day
+    assert guard.spent_usd == 0.01 and guard.try_reserve(0.01)
+
+
+async def test_failed_paid_request_is_refunded_and_free_provider_ignores_budget() -> None:
+    paid = FakeProvider("brave", [SearchProviderError("brave", "http_500"), HIT])
+    paid.price_per_1k_requests = 5.0
+    guard = SpendGuard(0.005)  # exactly one paid request per day
+    search = FailoverSearch([paid], budget=guard, failure_threshold=10)
+    first = await search.search("q", language="en", max_results=5)
+    assert first.response is None and guard.spent_usd == 0.0  # refunded
+    second = await search.search("q", language="en", max_results=5)
+    assert second.response is not None and guard.spent_usd == 0.005
+    third = await search.search("q", language="en", max_results=5)
+    assert third.attempts[0].error == "budget_exhausted" and paid.calls == 2
+
+    free = FakeProvider("searxng", [HIT])
+    out = await FailoverSearch([free], budget=SpendGuard(0.0001)).search(
+        "q", language="en", max_results=5
+    )
+    assert out.response is not None

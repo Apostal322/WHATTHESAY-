@@ -1,5 +1,6 @@
 """Deterministic ranking, deduplication and passage extraction."""
 
+from app.services.citations import EvidenceSource
 from app.services.evidence import (
     MAX_PASSAGE_CHARS,
     ClaimTerms,
@@ -7,6 +8,7 @@ from app.services.evidence import (
     excerpt_is_verbatim,
     extract_passages,
     lexical_relevance,
+    origin_groups,
     rank_hits,
     site_of,
 )
@@ -125,3 +127,66 @@ def test_cross_language_evidence_matches_its_own_query() -> None:
     english_page = "Chapaev and Void is a 1996 novel by the Russian writer Victor Pelevin."
     assert lexical_relevance(english_page, terms) >= 0.5
     assert lexical_relevance("A recipe for borscht with beetroot.", terms) == 0.0
+
+
+# ------------------------------------------------------------------ independence
+
+
+WIRE = (
+    "WASHINGTON (AP) — The Labor Department said Friday that employers added 254,000 jobs "
+    "in September, far more than economists had expected, and the unemployment rate fell."
+)
+
+
+def _src(sid: str, url: str, text: str, origin: str = "page_text") -> EvidenceSource:
+    return EvidenceSource(sid, url, None, None, [text], origin=origin)  # type: ignore[arg-type]
+
+
+def test_syndicated_copies_of_one_report_are_one_origin() -> None:
+    groups = origin_groups(
+        [
+            _src("S1", "https://apnews.com/article/jobs", WIRE),
+            _src("S2", "https://www.localpaper.com/news/jobs-report", "Posted 9:02 AM. " + WIRE),
+            _src(
+                "S3",
+                "https://www.bls.gov/news.release/empsit.nr0.htm",
+                "Total nonfarm payroll employment rose by 254,000 in September, and the unemployment rate changed little at 4.1 percent.",
+            ),
+        ]
+    )
+    assert groups["S1"] == groups["S2"]
+    assert groups["S3"] != groups["S1"]
+
+
+def test_same_site_is_one_origin_even_with_different_text() -> None:
+    groups = origin_groups(
+        [
+            _src(
+                "S1", "https://edition.cnn.com/a", "Completely different text about one topic here."
+            ),
+            _src(
+                "S2", "https://www.cnn.com/b", "Another unrelated passage on a second page there."
+            ),
+        ]
+    )
+    assert groups["S1"] == groups["S2"]
+
+
+def test_similar_grounding_summaries_are_not_merged() -> None:
+    groups = origin_groups(
+        [
+            _src("S1", "https://a.example/x", WIRE, origin="grounding_summary"),
+            _src("S2", "https://b.example/y", WIRE, origin="grounding_summary"),
+        ]
+    )
+    assert groups["S1"] != groups["S2"]  # model summaries say nothing about page identity
+
+
+def test_short_texts_are_not_declared_duplicates() -> None:
+    groups = origin_groups(
+        [
+            _src("S1", "https://a.example/x", "The tower opened in 1889."),
+            _src("S2", "https://b.example/y", "The tower opened in 1889."),
+        ]
+    )
+    assert groups["S1"] != groups["S2"]

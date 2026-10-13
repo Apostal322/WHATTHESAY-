@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.core.errors import ProviderQuotaExhaustedError
@@ -101,8 +102,8 @@ async def test_all_failed_searches_are_reported_as_a_failure_not_as_no_evidence(
             check_dns=False,
         )
         row = await cr.run_one("searxng", retriever, CASE, settings)
-    assert row["error"] == "all_searches_failed"
-    assert row["diagnostics"] == {"reasons": ["http_502"]}
+    assert row["error"] == "retrieval_unavailable"
+    assert row["diagnostics"]["provider_errors"] == ["http_502"]
 
 
 async def test_provider_error_is_recorded_with_diagnostics(settings: Settings) -> None:
@@ -167,3 +168,92 @@ def test_repo_retrieval_cases_are_valid_and_unverified_drafts_are_marked() -> No
     assert {c.language for c in cases} == {"en", "ru"}
     assert len({c.id for c in cases}) == len(cases)
     assert {c.draft_verdict for c in cases} >= {"supported", "contradicted"}
+
+
+async def test_citation_check_outcomes() -> None:
+    from app.evaluation.citation_check import check_citation
+
+    page = "<p>The Eiffel Tower was completed in March 1889 for the Exposition Universelle.</p>"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.host == "good.example":
+            return httpx.Response(200, html=page)
+        return httpx.Response(404)
+
+    def src(url: str, text: str, origin: str) -> EvidenceSource:
+        return EvidenceSource("S1", url, None, None, [text], origin=origin)  # type: ignore[arg-type]
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        verbatim = await check_citation(
+            src("https://x.example/", "t", "page_text"), http, check_dns=False
+        )
+        ok = await check_citation(
+            src("https://good.example/a", "Eiffel Tower completed 1889", "search_snippet"),
+            http,
+            check_dns=False,
+        )
+        wrong = await check_citation(
+            src(
+                "https://good.example/a",
+                "The tower was demolished in 1952 by engineers",
+                "grounding_summary",
+            ),
+            http,
+            check_dns=False,
+        )
+        gone = await check_citation(
+            src("https://gone.example/a", "Eiffel Tower completed 1889", "search_snippet"),
+            http,
+            check_dns=False,
+        )
+    assert verbatim == {"status": "verbatim"}
+    assert ok["status"] == "consistent"
+    assert wrong["status"] == "needs_review"  # 1952 is not on the page
+    assert gone == {"status": "unreachable", "reason": "http_404"}
+
+
+async def test_run_one_records_origin_groups_and_citations(settings: Settings) -> None:
+    text = "The Eiffel Tower was completed in March 1889 for the Exposition Universelle in Paris, France."
+
+    class Search:
+        name = "search"
+
+        async def retrieve(self, **kw: object) -> RetrievalResult:
+            return RetrievalResult(
+                sources=[
+                    EvidenceSource(
+                        "S1", "https://a.example/x", "A", "a.example", [text], origin="page_text"
+                    ),
+                    EvidenceSource(
+                        "S2", "https://b.example/y", "B", "b.example", [text], origin="page_text"
+                    ),
+                ],
+                executed_queries=["q"],
+                backend="brave",
+                search_cost_usd=0.01,
+            )
+
+    async with httpx.AsyncClient() as http:
+        row = await cr.run_one(
+            "brave", Search(), CASE, settings, citation_http=http, check_dns=False
+        )
+    assert row["sources"][0]["origin_group"] == row["sources"][1]["origin_group"]
+    assert [s["citation"]["status"] for s in row["sources"]] == ["verbatim", "verbatim"]
+    summary = summarize([row, {"backend": "brave", "error": "retrieval_unavailable"}])["brave"]
+    assert summary["mean_independent_sites"] == 2.0
+    assert summary["mean_independent_origins"] == 1.0  # one report, two sites
+    assert summary["citations"] == {"verbatim": 2}
+    assert summary["errors"] == {"retrieval_unavailable": 1}
+
+
+def test_script_refuses_paid_backend_without_budget(settings: Settings) -> None:
+    s = settings.model_copy(
+        update={"brave_api_key": SecretStr("k"), "price_per_1k_brave_requests": 5.0}
+    )
+    with pytest.raises(SystemExit) as info:
+        cr.build_retriever("brave", s, httpx.AsyncClient())
+    assert "YOUVERIFY_SEARCH_DAILY_BUDGET_USD" in str(info.value)
+    ok = cr.build_retriever(
+        "brave", s.model_copy(update={"search_daily_budget_usd": 1.0}), httpx.AsyncClient()
+    )
+    assert [p.name for p in ok._search.providers] == ["brave"]

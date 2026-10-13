@@ -74,6 +74,25 @@ class ProviderError(AppError):
     retryable = True
 
 
+class RetrievalUnavailableError(AppError):
+    """No evidence could be retrieved at all (every search or page fetch failed).
+
+    Distinct from the `insufficient_evidence` verdict, which means retrieval worked
+    and the evidence found did not settle the claim.
+    """
+
+    code = "retrieval_unavailable"
+    status_code = 503
+    retryable = True
+
+
+class ConfigurationError(AppError):
+    """The backend is configured inconsistently (e.g. a paid provider without a budget)."""
+
+    code = "backend_misconfigured"
+    status_code = 503
+
+
 class InvalidModelOutputError(AppError):
     code = "invalid_model_output"
     status_code = 502

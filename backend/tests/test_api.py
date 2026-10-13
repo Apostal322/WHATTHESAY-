@@ -163,3 +163,70 @@ def test_search_providers_follow_configured_order_and_skip_unconfigured(
     assert [p.name for p in build_search_providers(s, http)] == ["brave", "searxng"]
     only_searx = s.model_copy(update={"brave_api_key": None})
     assert [p.name for p in build_search_providers(only_searx, http)] == ["searxng"]
+
+
+def _search_settings(settings: Settings, **update: object) -> Settings:
+    base = {"retrieval_backend": "search", "brave_api_key": SecretStr("k")}
+    return settings.model_copy(update={**base, **update})
+
+
+def test_paid_search_requires_price_and_daily_cap(settings: Settings) -> None:
+    import httpx
+    import pytest
+
+    from app.api.deps import build_search_retriever
+    from app.core.errors import ConfigurationError
+
+    http = httpx.AsyncClient()
+    with pytest.raises(ConfigurationError) as info:
+        build_search_retriever(_search_settings(settings), http)
+    msg = info.value.message
+    assert "YOUVERIFY_PRICE_PER_1K_BRAVE" in msg and "YOUVERIFY_SEARCH_DAILY_BUDGET_USD" in msg
+
+    ok = _search_settings(settings, price_per_1k_brave_requests=5.0, search_daily_budget_usd=2.0)
+    retriever = build_search_retriever(ok, http)
+    assert [p.name for p in retriever._search.providers] == ["brave"]
+    assert retriever._search.budget is not None
+
+
+def test_paid_fallback_needs_explicit_opt_in(settings: Settings) -> None:
+    import httpx
+    import pytest
+
+    from app.api.deps import build_search_retriever
+    from app.core.errors import ConfigurationError
+
+    s = _search_settings(
+        settings,
+        search_providers="searxng,brave",
+        searxng_url="http://searxng:8080",
+        price_per_1k_brave_requests=5.0,
+        search_daily_budget_usd=2.0,
+    )
+    http = httpx.AsyncClient()
+    with pytest.raises(ConfigurationError) as info:
+        build_search_retriever(s, http)
+    assert "YOUVERIFY_ALLOW_PAID_SEARCH_FALLBACK" in info.value.message
+    allowed = build_search_retriever(
+        s.model_copy(update={"allow_paid_search_fallback": True}), http
+    )
+    assert [p.name for p in allowed._search.providers] == ["searxng", "brave"]
+
+
+def test_searxng_alone_needs_no_budget(settings: Settings) -> None:
+    import httpx
+
+    from app.api.deps import build_search_retriever
+
+    s = settings.model_copy(
+        update={
+            "retrieval_backend": "search",
+            "search_providers": "searxng",
+            "searxng_url": "http://searxng:8080",
+        }
+    )
+    assert build_search_retriever(s, httpx.AsyncClient())._search.budget is None
+
+
+def test_default_search_provider_is_brave(settings: Settings) -> None:
+    assert Settings(_env_file=None).search_providers == "brave"  # type: ignore[call-arg]

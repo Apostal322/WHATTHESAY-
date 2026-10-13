@@ -78,8 +78,10 @@ def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
     return f"""Claim:
 <untrusted>{escape_untrusted(claim)}</untrusted>{ctx}
 
-- normalized_claim: restate the claim precisely and self-contained, keeping its original meaning, numbers and scope. Do not strengthen or weaken it.
+- normalized_claim: restate the claim precisely and self-contained, keeping its original meaning, numbers and scope. Do not strengthen or weaken it. If the context names who said it and when, and the claim depends on that (politics, current events), keep the speaker and date in the claim.
 - claim_type: factual | prediction | opinion | ambiguous | non_verifiable.
+  - Religion and philosophy: historical events, dates, and what a text or person actually says are factual. Interpretations of doctrine and value judgements are opinion. Metaphysical assertions that no evidence could settle (e.g. about the soul, God, nirvana, the purpose of religion) are non_verifiable.
+  - Attributions ("X said/wrote Y"): if the point is that X said it, the claim is factual about the attribution only; write normalized_claim as "X said/wrote that Y" and do not check Y itself.
 - is_checkworthy: true if at least one objectively checkable factual assertion is present.
 - search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language.
 - scope_notes: time period, geography, definitions or measurement details the verdict depends on.
@@ -127,11 +129,24 @@ Rules:
 
 
 def evaluation_prompt(
-    *, claim: str, scope_notes: str | None, sources_block: str, language: str
+    *,
+    claim: str,
+    scope_notes: str | None,
+    sources_block: str,
+    language: str,
+    context: str | None = None,
 ) -> str:
     scope = f"\nScope considerations: {escape_untrusted(scope_notes)}" if scope_notes else ""
+    ctx = (
+        "\nWhere and when it was said (from the video):\n"
+        f"<untrusted>{escape_untrusted(context)}</untrusted>\n"
+        "Judge the claim as its speaker meant it at that time: use evidence about the period the "
+        "claim refers to, and keep attributions (who said what) intact."
+        if context
+        else ""
+    )
     return f"""Claim to evaluate:
-<untrusted>{escape_untrusted(claim)}</untrusted>{scope}
+<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}
 
 Sources:
 {sources_block}

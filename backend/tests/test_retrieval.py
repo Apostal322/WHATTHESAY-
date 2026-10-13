@@ -3,9 +3,11 @@
 from typing import Any
 
 import httpx
+import pytest
 
 from app.core.cache import TTLCache
-from app.services.retrieval import SearchRetriever
+from app.core.errors import RetrievalUnavailableError
+from app.services.retrieval import GeminiGroundingRetriever, SearchRetriever
 from app.services.search import (
     FailoverOutcome,
     FailoverSearch,
@@ -124,13 +126,82 @@ async def test_unknown_price_makes_cost_unknown_not_zero() -> None:
     assert res.search_cost_usd is None
 
 
-async def test_all_providers_down_gives_no_sources_and_a_reason() -> None:
+async def test_all_providers_down_is_retrieval_unavailable_not_insufficient_evidence() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(_pages)) as http:
-        res = await _retriever(
-            Provider("searxng", SearchProviderError("searxng", "http_502")),
-            Provider("brave", SearchProviderError("brave", "rate_limited")),
-            http=http,
-        ).retrieve(claim=CLAIM, queries=QUERIES, scope_notes=None, language="en")
-    assert res.sources == [] and res.backend == "none"
-    assert res.empty_reason == "All search providers failed or returned no results."
-    assert res.billed_searches == 0
+        with pytest.raises(RetrievalUnavailableError) as info:
+            await _retriever(
+                Provider("searxng", SearchProviderError("searxng", "http_502")),
+                Provider("brave", SearchProviderError("brave", "rate_limited")),
+                http=http,
+            ).retrieve(claim=CLAIM, queries=QUERIES, scope_notes=None, language="en")
+    err = info.value
+    assert err.code == "retrieval_unavailable" and err.retryable
+    assert (err.diagnostics or {})["provider_errors"] == ["http_502", "rate_limited"]
+
+
+async def test_zero_results_is_a_successful_retrieval_with_no_evidence() -> None:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_pages)) as http:
+        res = await _retriever(Provider("brave", []), http=http).retrieve(
+            claim=CLAIM, queries=QUERIES, scope_notes=None, language="en"
+        )
+    assert res.sources == []
+    assert res.empty_reason == "The search returned no results for this claim."
+
+
+async def test_one_failed_query_does_not_fail_retrieval() -> None:
+    class Flaky(Provider):
+        async def search(self, query: str, *, language: str, max_results: int) -> SearchResponse:
+            if query == QUERIES[0]:
+                raise SearchProviderError(self.name, "timeout")
+            return await super().search(query, language=language, max_results=max_results)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_pages)) as http:
+        res = await _retriever(Flaky("brave", HITS), http=http).retrieve(
+            claim=CLAIM, queries=QUERIES, scope_notes=None, language="en"
+        )
+    assert res.sources and res.executed_queries == [QUERIES[1]]
+
+
+async def test_every_page_unreadable_without_snippets_is_retrieval_unavailable() -> None:
+    no_snippets = [SearchHit(h.url, h.title, None, h.rank) for h in HITS]
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda r: httpx.Response(503))
+    ) as http:
+        with pytest.raises(RetrievalUnavailableError) as info:
+            await _retriever(Provider("brave", no_snippets), http=http).retrieve(
+                claim="Eiffel Tower completed 1889",
+                queries=QUERIES,
+                scope_notes=None,
+                language="en",
+            )
+    assert (info.value.diagnostics or {})["stage"] == "fetch"
+
+
+async def test_exhausted_budget_is_not_retryable() -> None:
+    from app.services.search import SpendGuard
+
+    brave = Provider("brave", HITS, price=5.0)
+    search = FailoverSearch([brave], budget=SpendGuard(daily_limit_usd=0.004))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(_pages)) as http:
+        with pytest.raises(RetrievalUnavailableError) as info:
+            await SearchRetriever(search, http, check_dns=False).retrieve(
+                claim=CLAIM, queries=QUERIES, scope_notes=None, language="en"
+            )
+    assert brave.calls == 0
+    assert info.value.retryable is False
+    assert "daily evidence-search capacity" in info.value.message
+
+
+async def test_grounding_without_search_metadata_is_retrieval_unavailable() -> None:
+    from dataclasses import replace
+
+    from tests.conftest import FakeLLM, make_grounded
+
+    llm = FakeLLM(
+        grounded=replace(make_grounded(chunks=[], supports=[]), raw_metadata_present=False)
+    )
+    with pytest.raises(RetrievalUnavailableError):
+        await GeminiGroundingRetriever(llm, "m").retrieve(
+            claim=CLAIM, queries=QUERIES, scope_notes=None, language="en"
+        )

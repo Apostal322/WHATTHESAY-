@@ -338,3 +338,131 @@ async def test_search_retriever_with_no_sources_reports_its_reason(settings: Set
     assert resp.verdict == "insufficient_evidence"
     assert resp.limitations == ["All search providers failed or returned no results."]
     assert [name for name, _ in llm.calls] == ["ClaimAnalysisOutput"]  # no evaluation call
+
+
+SYNDICATED = "The Labor Department said employers added 254,000 jobs in September, far more than economists had expected, and unemployment fell to 4.1 percent."
+
+
+async def test_republished_reports_count_once_and_are_flagged_to_the_evaluator(
+    settings: Settings,
+) -> None:
+    retriever = StaticRetriever(
+        RetrievalResult(
+            sources=[
+                EvidenceSource(
+                    "S1",
+                    "https://apnews.com/a",
+                    "AP",
+                    "apnews.com",
+                    [SYNDICATED],
+                    origin="page_text",
+                ),
+                EvidenceSource(
+                    "S2",
+                    "https://www.localpaper.com/b",
+                    "Local",
+                    "localpaper.com",
+                    [SYNDICATED],
+                    origin="page_text",
+                ),
+            ],
+            executed_queries=["q"],
+            backend="brave",
+        )
+    )
+    llm = FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [
+                    {"source_id": "S1", "stance": "supports", "note": "n"},
+                    {"source_id": "S2", "stance": "supports", "note": "n"},
+                ],
+                "verdict": "supported",
+                "explanation": "Jobs grew [S1][S2].",
+                "key_findings": [],
+                "limitations": [],
+            },
+        }
+    )
+    resp = await VerificationService(llm, settings, retriever=retriever).verify(
+        VerifyRequest(claim=CLAIM, language="en")
+    )
+    eval_prompt = llm.calls[-1][1]["prompt"]
+    assert "same site or same original report as S2" in eval_prompt
+    assert resp.independent_source_count == 1
+    assert any("single source domain or original report" in n for n in resp.guardrail_notes)
+
+
+async def test_findings_cannot_cite_sources_assessed_against_them(settings: Settings) -> None:
+    llm = FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [
+                    {"source_id": "S1", "stance": "contradicts", "note": "Growth."},
+                    {"source_id": "S2", "stance": "irrelevant", "note": "Off-topic."},
+                ],
+                "verdict": "contradicted",
+                "explanation": "Employment grows [S1].",
+                "key_findings": [
+                    {
+                        "text": "Employment grows [S1].",
+                        "stance": "contradicts",
+                        "source_ids": ["S1", "S2"],
+                    },
+                    {
+                        "text": "AI replaced most engineers [S2].",
+                        "stance": "supports",
+                        "source_ids": ["S2"],
+                    },
+                ],
+                "limitations": [],
+            },
+        },
+        grounded=GROUNDED,
+    )
+    resp = await _service(llm, settings).verify(VerifyRequest(claim=CLAIM))
+    assert [(f.stance, f.source_ids) for f in resp.key_findings] == [("contradicts", ["S1"])]
+    assert any("Removed 2 citation(s)" in n for n in resp.guardrail_notes)
+
+
+async def test_snippet_only_verdict_is_flagged_and_context_reaches_the_evaluator(
+    settings: Settings,
+) -> None:
+    retriever = StaticRetriever(
+        RetrievalResult(
+            sources=[
+                EvidenceSource(
+                    "S1",
+                    "https://www.bls.gov/x",
+                    "BLS",
+                    "bls.gov",
+                    ["Jobs grew."],
+                    origin="search_snippet",
+                )
+            ],
+            executed_queries=["q"],
+            backend="brave",
+        )
+    )
+    llm = FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [{"source_id": "S1", "stance": "contradicts", "note": "n"}],
+                "verdict": "contradicted",
+                "explanation": "Jobs grew [S1].",
+                "key_findings": [],
+                "limitations": [],
+            },
+        }
+    )
+    ctx = "Kamala Harris speaking to Donald Trump in the ABC News debate, 10 September 2024."
+    resp = await VerificationService(llm, settings, retriever=retriever).verify(
+        VerifyRequest(claim=CLAIM, context=ctx, language="en")
+    )
+    assert any("only on search-engine snippets" in n for n in resp.guardrail_notes)
+    eval_prompt = llm.calls[-1][1]["prompt"]
+    assert "ABC News debate, 10 September 2024" in eval_prompt
+    assert "keep attributions" in eval_prompt

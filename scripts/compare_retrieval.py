@@ -33,15 +33,16 @@ sys.path.insert(0, str(REPO / "backend"))
 
 import httpx
 
+from app.api.deps import build_search_retriever
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging
+from app.evaluation.citation_check import check_citation
 from app.evaluation.retrieval import RetrievalCase, classify_source, summarize
 from app.services.citations import EvidenceSource, is_grounding_redirect
-from app.services.evidence import ClaimTerms, lexical_relevance, site_of
+from app.services.evidence import ClaimTerms, lexical_relevance, origin_groups, site_of
 from app.services.llm import GeminiClient
-from app.services.retrieval import GeminiGroundingRetriever, Retriever, SearchRetriever
-from app.services.search import BraveProvider, FailoverSearch, SearchProvider, SearxngProvider
+from app.services.retrieval import GeminiGroundingRetriever, Retriever
 from app.services.structured import to_token_usage
 
 BACKENDS = ("searxng", "brave", "gemini_grounding")
@@ -67,33 +68,33 @@ def build_retriever(name: str, settings: Settings, http: httpx.AsyncClient) -> R
         return GeminiGroundingRetriever(
             llm, settings.verification_model, http, settings.resolve_source_redirects
         )
-    provider: SearchProvider
-    if name == "searxng":
-        if not settings.searxng_url:
-            raise SystemExit("searxng needs --searxng-url or YOUVERIFY_SEARXNG_URL")
-        provider = SearxngProvider(settings.searxng_url, http, settings.search_timeout_sec)
-    elif name == "brave":
-        if not settings.brave_api_key:
-            raise SystemExit("brave needs BRAVE_SEARCH_API_KEY")
-        provider = BraveProvider(
-            settings.brave_api_key.get_secret_value(),
-            http,
-            settings.search_timeout_sec,
-            settings.price_per_1k_brave_requests,
-        )
-    else:
+    if name not in ("searxng", "brave"):
         raise SystemExit(f"unknown backend {name!r}; choose from {BACKENDS}")
-    # No cache: every case must hit the provider for a fair latency/cost measurement.
-    return SearchRetriever(
-        FailoverSearch([provider], failure_threshold=10_000),
-        http,
-        pages_to_fetch=settings.pages_to_fetch,
+    # One provider per backend (no failover), no cache, breaker effectively off: every case
+    # hits the provider, for a fair latency/cost measurement. Same validation as the API.
+    single = settings.model_copy(
+        update={
+            "retrieval_backend": "search",
+            "search_providers": name,
+            "search_failure_threshold": 1_000_000,
+        }
     )
+    try:
+        return build_search_retriever(single, http, cache=None)
+    except AppError as exc:
+        raise SystemExit(f"{name}: {exc.message}") from exc
 
 
 async def run_one(
-    backend: str, retriever: Retriever, case: RetrievalCase, settings: Settings
+    backend: str,
+    retriever: Retriever,
+    case: RetrievalCase,
+    settings: Settings,
+    *,
+    citation_http: httpx.AsyncClient | None = None,
+    check_dns: bool = True,
 ) -> dict[str, Any]:
+    """`citation_http` set = re-fetch each cited page and check its excerpt (citation accuracy)."""
     row: dict[str, Any] = {"backend": backend, "case": case.id, "category": case.category}
     started = time.perf_counter()
     try:
@@ -108,13 +109,15 @@ async def run_one(
         )
         return row
     row["latency_ms"] = int((time.perf_counter() - started) * 1000)
-    searches = res.diagnostics.get("searches", [])
-    if backend != "gemini_grounding" and res.backend == "none":
-        reasons = sorted({a["error"] for q in searches for a in q["attempts"] if a["error"]})
-        if reasons:  # every search failed: a provider failure, not "no evidence"
-            row.update(error="all_searches_failed", diagnostics={"reasons": reasons})
-            return row
     terms = ClaimTerms.build(case.claim, case.queries)
+    groups = origin_groups(res.sources)
+    citations: list[dict[str, Any] | None] = [None] * len(res.sources)
+    if citation_http is not None:
+        citations = list(
+            await asyncio.gather(
+                *(check_citation(s, citation_http, check_dns=check_dns) for s in res.sources)
+            )
+        )
     usage = to_token_usage(res.usage, settings, res.billed_searches, res.search_cost_usd)
     row.update(
         billed_searches=res.billed_searches,
@@ -130,12 +133,14 @@ async def run_one(
                 "site": site_of(publisher_url(s)),
                 "source_type": classify_source(publisher_url(s)),
                 "origin": s.origin,
+                "origin_group": groups[s.id],
+                "citation": citation,
                 "relevance": round(
                     max((lexical_relevance(x, terms) for x in s.excerpts), default=0.0), 3
                 ),
                 "excerpts": s.excerpts,
             }
-            for s in res.sources
+            for s, citation in zip(res.sources, citations, strict=True)
         ],
     )
     return row
@@ -161,16 +166,24 @@ def render_report(
         "",
         "## Summary (successful runs only)",
         "",
-        "| backend | cases | failed | with sources | median latency ms | sources/claim | independent sites/claim | page-text share | mean excerpt relevance | source types | cost $/claim (known for) |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        "| backend | cases | failed (codes) | with sources | median latency ms | sources/claim | independent sites/claim | independent origins/claim | page-text share | mean excerpt relevance | citation check | source types | cost $/claim (known for) |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for b, st in summary.items():
         lines.append(
-            f"| {b} | {st['cases']} | {st['failed']} | {st['with_sources']} | {st['median_latency_ms']} | "
-            f"{st['mean_sources']} | {st['mean_independent_sites']} | {st['page_text_share']} | "
-            f"{st['mean_excerpt_relevance']} | {_md(st['source_types'], 120)} | "
+            f"| {b} | {st['cases']} | {st['failed']}{' ' + _md(st['errors'], 60) if st['errors'] else ''} | {st['with_sources']} | "
+            f"{st['median_latency_ms']} | {st['mean_sources']} | {st['mean_independent_sites']} | "
+            f"{st['mean_independent_origins']} | {st['page_text_share']} | {st['mean_excerpt_relevance']} | "
+            f"{_md(st['citations'] or 'not run', 80)} | {_md(st['source_types'], 120)} | "
             f"{st['cost_usd_per_claim']} ({st['cost_known_for']}) |"
         )
+    lines += [
+        "",
+        "*Independent origins* merge sources from one site and republished copies of one report. "
+        "*Citation check*: `verbatim` = page text checked during retrieval; `consistent` = the "
+        "re-fetched page contains the excerpt's content words and numbers; `needs_review` / "
+        "`unreachable` go to the review sheet.",
+    ]
     lines += [
         "",
         "## Per case",
@@ -184,7 +197,7 @@ def render_report(
         note = r.get("error") or r.get("empty_reason") or ""
         if r.get("error") and r.get("diagnostics"):
             d = r["diagnostics"]
-            note += f" ({_md(d.get('reasons') or d.get('provider_status') or d, 80)})"
+            note += f" ({_md(d.get('provider_errors') or d.get('fetch') or d.get('provider_status') or d, 80)})"
         lines.append(
             f"| {r['case']} | {r['backend']} | {r.get('latency_ms')} | {len(srcs)} | "
             f"{len({s['site'] for s in srcs})} | {types} | {r.get('cost_usd')} | {_md(note, 100)} |"
@@ -196,15 +209,16 @@ def render_report(
         verified = f"verified by {c.verified_by}" if c.verified_by else "draft, unverified"
         lines += [f"### {cid}: {c.claim}", "", f"Draft verdict: {c.draft_verdict} ({verified})", ""]
         lines += [
-            "| backend | id | type | origin | url | excerpt | relevant? | reliable? | supports / contradicts / neither |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| backend | id | type | origin | citation check | url | excerpt | relevant? | reliable? | supports / contradicts / neither |",
+            "|---|---|---|---|---|---|---|---|---|---|",
         ]
         for r in rows:
             if r["case"] != cid:
                 continue
             for s in r.get("sources") or []:
                 lines.append(
-                    f"| {r['backend']} | {s['id']} | {s['source_type']} | {s['origin']} | {_md(s['url'], 60)} | "
+                    f"| {r['backend']} | {s['id']} | {s['source_type']} | {s['origin']} | "
+                    f"{(s.get('citation') or {}).get('status', '–')} | {_md(s['url'], 60)} | "
                     f"{_md(' / '.join(s['excerpts']), 140)} | | | |"
                 )
         lines.append("")
@@ -220,7 +234,15 @@ async def run_all(
         for case in cases:
             for backend, retriever in retrievers.items():
                 print(f"[{case.id}] {backend}…", file=sys.stderr)
-                rows.append(await run_one(backend, retriever, case, settings))
+                rows.append(
+                    await run_one(
+                        backend,
+                        retriever,
+                        case,
+                        settings,
+                        citation_http=http if args.check_citations else None,
+                    )
+                )
     return rows
 
 
@@ -229,10 +251,18 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("cases")
-    ap.add_argument("--backends", default="searxng,brave,gemini_grounding")
+    ap.add_argument("--backends", default="brave,gemini_grounding")
     ap.add_argument("--only", help="Comma-separated case ids")
     ap.add_argument("--searxng-url")
     ap.add_argument("--price-brave-1k", type=float, help="USD per 1000 Brave requests")
+    ap.add_argument(
+        "--search-budget-usd", type=float, help="Daily cap for paid search during this run"
+    )
+    ap.add_argument(
+        "--check-citations",
+        action="store_true",
+        help="Re-fetch snippet/summary sources and check each excerpt against its page",
+    )
     ap.add_argument("--price-in", type=float, help="USD per 1M Gemini input tokens")
     ap.add_argument("--price-out", type=float, help="USD per 1M Gemini output tokens")
     ap.add_argument("--price-search-1k", type=float, help="USD per 1000 grounding searches")
@@ -252,6 +282,7 @@ def main() -> int:
     for flag, field in (
         ("searxng_url", "searxng_url"),
         ("price_brave_1k", "price_per_1k_brave_requests"),
+        ("search_budget_usd", "search_daily_budget_usd"),
         ("price_in", "price_input_per_million"),
         ("price_out", "price_output_per_million"),
         ("price_search_1k", "price_per_1k_search_queries"),

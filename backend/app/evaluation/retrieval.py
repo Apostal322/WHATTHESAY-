@@ -74,10 +74,24 @@ class RetrievalCase(BaseModel):
         default=None, description="Who checked draft_verdict against primary sources, and when."
     )
     notes: str | None = None
+    source_video: str | None = Field(
+        default=None, description="Evaluation video the claim comes from (watch URL with &t=)."
+    )
+    context: str | None = Field(
+        default=None,
+        description="Who said it, when and where. Passed to verification like the extension does.",
+    )
 
 
 def _median(values: list[float]) -> float | None:
     return round(statistics.median(values), 1) if values else None
+
+
+def _count(items: Any) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in items:
+        out[item] = out.get(item, 0) + 1
+    return out
 
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -102,6 +116,17 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             )
             if ok
             else None,
+            # Sites and republished copies of one report count once (evidence.origin_groups).
+            "mean_independent_origins": round(
+                statistics.mean(
+                    [len({s.get("origin_group", s["site"]) for s in r["sources"]}) for r in ok]
+                ),
+                2,
+            )
+            if ok
+            else None,
+            "citations": _count(s["citation"]["status"] for s in sources if s.get("citation")),
+            "errors": _count(r["error"] for r in mine if r.get("error")),
             "source_types": {t: types.count(t) for t in dict.fromkeys(types)},
             "page_text_share": round(
                 sum(1 for s in sources if s["origin"] == "page_text") / len(sources), 2

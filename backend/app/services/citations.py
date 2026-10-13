@@ -166,15 +166,25 @@ async def resolve_redirects(sources: list[EvidenceSource], client: httpx.AsyncCl
     await asyncio.gather(*(_one(s) for s in sources))
 
 
-def format_sources_for_prompt(sources: list[EvidenceSource]) -> str:
+def format_sources_for_prompt(
+    sources: list[EvidenceSource], same_origin: dict[str, list[str]] | None = None
+) -> str:
+    """Numbered source block for the evaluator.
+
+    `same_origin` maps a source id to other ids that share its site or republish
+    the same report, so the evaluator does not count them as independent.
+    """
     from app.services.prompts import escape_untrusted
 
     blocks = []
     for src in sources:
-        lines = [
+        header = (
             f"[{src.id}] {src.title or 'Untitled'} ({src.domain or 'unknown domain'}); "
             f"excerpts: {_ORIGIN_LABEL[src.origin]}"
-        ]
+        )
+        if same_origin and same_origin.get(src.id):
+            header += f"; same site or same original report as {', '.join(same_origin[src.id])}"
+        lines = [header]
         lines += [f"  - <untrusted>{escape_untrusted(ex)}</untrusted>" for ex in src.excerpts]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)

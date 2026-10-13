@@ -58,11 +58,21 @@ class Settings(BaseSettings):
     retrieval_backend: Literal["gemini_grounding", "search"] = Field(
         default="gemini_grounding", alias="YOUVERIFY_RETRIEVAL_BACKEND"
     )
-    search_providers: str = Field(default="searxng,brave", alias="YOUVERIFY_SEARCH_PROVIDERS")
+    # Tried in order. Brave is the recommended public-deployment provider; SearXNG and
+    # Gemini grounding remain independently selectable for evaluation.
+    search_providers: str = Field(default="brave", alias="YOUVERIFY_SEARCH_PROVIDERS")
     searxng_url: str | None = Field(default=None, alias="YOUVERIFY_SEARXNG_URL")
     brave_api_key: SecretStr | None = Field(default=None, alias="BRAVE_SEARCH_API_KEY")
     price_per_1k_brave_requests: float | None = Field(
         default=None, ge=0, alias="YOUVERIFY_PRICE_PER_1K_BRAVE"
+    )
+    # Metered (paid) search requires a price and a daily cap; a paid provider placed
+    # after another one (automatic paid fallback) additionally requires opting in.
+    search_daily_budget_usd: float | None = Field(
+        default=None, gt=0, alias="YOUVERIFY_SEARCH_DAILY_BUDGET_USD"
+    )
+    allow_paid_search_fallback: bool = Field(
+        default=False, alias="YOUVERIFY_ALLOW_PAID_SEARCH_FALLBACK"
     )
     search_timeout_sec: float = Field(default=8, gt=0, le=60, alias="YOUVERIFY_SEARCH_TIMEOUT_SEC")
     search_failure_threshold: int = Field(default=3, ge=1, alias="YOUVERIFY_SEARCH_FAILURES")

@@ -96,6 +96,10 @@ export function errorHint(code: string): string | null {
     case "rate_limited":
     case "provider_rate_limited":
       return "Wait a minute and try again.";
+    case "retrieval_unavailable":
+      return "No evidence could be retrieved, so no verdict was given. This is not a judgement on the claim.";
+    case "backend_misconfigured":
+      return "The backend's search configuration is incomplete. The operator needs to fix it.";
     case "provider_quota_exhausted":
       return "The Gemini API key has used up its quota (e.g. the free-tier daily limit). Try again after it resets or use a key with a higher quota.";
     default:

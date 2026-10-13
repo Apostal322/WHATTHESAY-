@@ -17,6 +17,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Protocol
 
 import httpx
@@ -187,6 +188,39 @@ class BraveProvider:
         return SearchResponse(hits=hits[:max_results], provider=self.name)
 
 
+class SpendGuard:
+    """Daily spending cap for metered search APIs (resets at 00:00 UTC).
+
+    Spend is reserved before a request and refunded if it fails, so concurrent
+    requests cannot overshoot the cap. Per process: with several instances, give
+    each a share of the budget (or move the counter to Redis, same interface).
+    """
+
+    def __init__(
+        self, daily_limit_usd: float, now: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ) -> None:
+        self.daily_limit_usd = daily_limit_usd
+        self._now = now
+        self._day = now().date()
+        self.spent_usd = 0.0
+
+    def _roll(self) -> None:
+        today = self._now().date()
+        if today != self._day:
+            self._day, self.spent_usd = today, 0.0
+
+    def try_reserve(self, usd: float) -> bool:
+        self._roll()
+        if self.spent_usd + usd > self.daily_limit_usd + 1e-12:
+            return False
+        self.spent_usd += usd
+        return True
+
+    def refund(self, usd: float) -> None:
+        self._roll()
+        self.spent_usd = max(0.0, self.spent_usd - usd)
+
+
 @dataclass
 class Attempt:
     provider: str
@@ -218,10 +252,12 @@ class FailoverSearch:
         failure_threshold: int = 3,
         cooldown_sec: float = 60.0,
         clock: Callable[[], float] = time.monotonic,
+        budget: SpendGuard | None = None,
     ) -> None:
         if not providers:
             raise ValueError("At least one search provider is required.")
         self.providers = providers
+        self.budget = budget
         self._threshold = failure_threshold
         self._cooldown = cooldown_sec
         self._clock = clock
@@ -247,11 +283,18 @@ class FailoverSearch:
             if not self._available(provider.name):
                 outcome.attempts.append(Attempt(provider.name, False, 0, error="cooling_down"))
                 continue
+            fee = (provider.price_per_1k_requests or 0.0) / 1000
+            if fee and self.budget is not None and not self.budget.try_reserve(fee):
+                outcome.attempts.append(Attempt(provider.name, False, 0, error="budget_exhausted"))
+                log.warning("search_budget_exhausted", extra={"provider": provider.name})
+                continue
             started = time.perf_counter()
             try:
                 resp = await provider.search(query, language=language, max_results=max_results)
             except SearchProviderError as exc:
                 ms = int((time.perf_counter() - started) * 1000)
+                if fee and self.budget is not None:
+                    self.budget.refund(fee)  # failed requests are not billed
                 self._record(provider.name, ok=False)
                 reason = redact_secrets(exc.reason)
                 outcome.attempts.append(Attempt(provider.name, False, ms, error=reason))

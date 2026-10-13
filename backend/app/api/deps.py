@@ -10,7 +10,7 @@ from fastapi import Request
 
 from app.core.cache import TTLCache
 from app.core.config import Settings
-from app.core.errors import MissingCredentialsError
+from app.core.errors import ConfigurationError, MissingCredentialsError
 from app.core.rate_limit import SlidingWindowRateLimiter
 from app.models.schemas import ExtractResponse, VerifyResponse
 from app.services.extraction import ExtractionService
@@ -22,6 +22,7 @@ from app.services.search import (
     FailoverSearch,
     SearchProvider,
     SearxngProvider,
+    SpendGuard,
 )
 from app.services.verification import VerificationService
 
@@ -58,24 +59,52 @@ class AppState:
         if self.settings.retrieval_backend != "search":
             return None
         if self.retriever is None:
-            providers = build_search_providers(self.settings, self.http_client)
-            if not providers:
-                raise MissingCredentialsError(
-                    "Search retrieval is enabled but no search provider is configured. Set "
-                    "YOUVERIFY_SEARXNG_URL and/or BRAVE_SEARCH_API_KEY on the backend."
-                )
-            s = self.settings
-            self.retriever = SearchRetriever(
-                FailoverSearch(
-                    providers,
-                    failure_threshold=s.search_failure_threshold,
-                    cooldown_sec=s.search_cooldown_sec,
-                ),
-                self.http_client,
-                pages_to_fetch=s.pages_to_fetch,
-                cache=self.search_cache,
+            self.retriever = build_search_retriever(
+                self.settings, self.http_client, self.search_cache
             )
         return self.retriever
+
+
+def build_search_retriever(
+    s: Settings,
+    http: httpx.AsyncClient,
+    cache: TTLCache[FailoverOutcome] | None = None,
+) -> SearchRetriever:
+    """Validated search retriever; used by the API and the evaluation scripts alike."""
+    providers = build_search_providers(s, http)
+    if not providers:
+        raise MissingCredentialsError(
+            "Search retrieval is enabled but no search provider is configured. Set "
+            "BRAVE_SEARCH_API_KEY and/or YOUVERIFY_SEARXNG_URL on the backend."
+        )
+    problems: list[str] = []
+    metered = [p for p in providers if p.price_per_1k_requests != 0.0]
+    for p in metered:
+        if p.price_per_1k_requests is None:
+            problems.append(
+                f"{p.name}: set its price per 1000 requests (e.g. YOUVERIFY_PRICE_PER_1K_BRAVE)"
+            )
+    if metered and s.search_daily_budget_usd is None:
+        problems.append("paid search needs a daily cap: set YOUVERIFY_SEARCH_DAILY_BUDGET_USD")
+    if any(p is not providers[0] for p in metered) and not s.allow_paid_search_fallback:
+        problems.append(
+            "a paid provider is configured as a fallback; set "
+            "YOUVERIFY_ALLOW_PAID_SEARCH_FALLBACK=true to allow it explicitly"
+        )
+    if problems:
+        raise ConfigurationError("Search configuration is incomplete: " + "; ".join(problems) + ".")
+    budget = SpendGuard(s.search_daily_budget_usd) if s.search_daily_budget_usd else None
+    return SearchRetriever(
+        FailoverSearch(
+            providers,
+            failure_threshold=s.search_failure_threshold,
+            cooldown_sec=s.search_cooldown_sec,
+            budget=budget,
+        ),
+        http,
+        pages_to_fetch=s.pages_to_fetch,
+        cache=cache,
+    )
 
 
 def build_search_providers(s: Settings, http: httpx.AsyncClient) -> list[SearchProvider]:

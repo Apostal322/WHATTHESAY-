@@ -25,6 +25,7 @@ from app.models.schemas import (
 )
 from app.services import prompts
 from app.services.citations import EvidenceSource, format_sources_for_prompt
+from app.services.evidence import origin_groups
 from app.services.llm import LLMClient, Usage
 from app.services.retrieval import GeminiGroundingRetriever, RetrievalResult, Retriever
 from app.services.structured import clip, parse_model_json, to_token_usage
@@ -74,9 +75,12 @@ def apply_verdict_guardrails(
 
     basis = supports if final == "supported" else contradicts if final == "contradicted" else set()
     if basis:
-        domains = {sources[sid].domain or sources[sid].url for sid in basis}
-        if len(domains) == 1:
-            notes.append("The verdict rests on a single source domain; treat it with caution.")
+        groups = origin_groups(list(sources.values()))
+        if len({groups[sid] for sid in basis}) == 1:
+            notes.append(
+                "The verdict rests on a single source domain or original report; treat it "
+                "with caution."
+            )
     if final == "supported" and contradicts:
         notes.append("Some retrieved sources contradict the claim; see the evidence list.")
     if final == "contradicted" and supports:
@@ -89,9 +93,28 @@ def strip_unknown_citations(text: str, known: set[str]) -> str:
     return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", re.sub(r" {2,}", " ", stripped)).strip()
 
 
+# Source stances that can back a key finding with the given stance.
+_COMPATIBLE: dict[Stance, set[Stance]] = {
+    "supports": {"supports", "partially_supports"},
+    "contradicts": {"contradicts", "partially_supports"},
+    "partially_supports": {"supports", "partially_supports", "contradicts"},
+    "irrelevant": set(),
+}
+
+
+def _same_origin(sources: list[EvidenceSource]) -> dict[str, list[str]]:
+    groups = origin_groups(sources)
+    return {
+        s.id: [o.id for o in sources if o.id != s.id and groups[o.id] == groups[s.id]]
+        for s in sources
+    }
+
+
 def independent_domains(stances: dict[str, Stance], sources: dict[str, EvidenceSource]) -> int:
+    """Independent origins among relevant sources: sites and republished copies count once."""
     used = {sid for sid, st in stances.items() if st != "irrelevant"}
-    return len({sources[sid].domain or sources[sid].url for sid in used})
+    groups = origin_groups(list(sources.values()))
+    return len({groups[sid] for sid in used})
 
 
 # --------------------------------------------------------------------- service
@@ -226,7 +249,8 @@ class VerificationService:
             prompt=prompts.evaluation_prompt(
                 claim=normalized,
                 scope_notes=analysis.scope_notes,
-                sources_block=format_sources_for_prompt(sources),
+                sources_block=format_sources_for_prompt(sources, _same_origin(sources)),
+                context=req.context,
                 language=req.language,
             ),
             schema=EvaluationOutput,
@@ -253,11 +277,30 @@ class VerificationService:
         notes += guard_notes
 
         findings: list[KeyFinding] = []
+        misaligned = 0
         for f in evaluation.key_findings[:8]:
-            ids = [sid for sid in f.source_ids if sid in by_id]
+            known = [sid for sid in f.source_ids if sid in by_id]
+            # A finding may only cite sources the evaluator itself assessed as backing it.
+            ids = [sid for sid in known if stances.get(sid) in _COMPATIBLE[f.stance]]
+            misaligned += len(known) - len(ids)
             text = clip(strip_unknown_citations(f.text, set(by_id)), 500)
             if ids and text:  # an uncited finding is not evidence
                 findings.append(KeyFinding(text=text, stance=f.stance, source_ids=ids))
+        if misaligned:
+            notes.append(
+                f"Removed {misaligned} citation(s) from key findings: the cited source was not "
+                "assessed as backing that finding."
+            )
+        basis_ids = [
+            sid
+            for sid, st in stances.items()
+            if (verdict, st) in {("supported", "supports"), ("contradicted", "contradicts")}
+        ]
+        if basis_ids and all(by_id[sid].origin == "search_snippet" for sid in basis_ids):
+            notes.append(
+                "The verdict rests only on search-engine snippets; the pages themselves could "
+                "not be read. Open the sources to confirm."
+            )
 
         explanation = clip(strip_unknown_citations(evaluation.explanation, set(by_id)), 1200) or ""
         if verdict != evaluation.verdict:

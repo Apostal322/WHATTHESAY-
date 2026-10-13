@@ -221,3 +221,48 @@ async def test_failed_stage_keeps_diagnostics_and_is_listed_separately(settings:
     assert "| en-test | extraction | provider_quota_exhausted | video_extraction | 429 |" in failed
     assert "GenerateRequestsPerDayPerProjectPerModel-FreeTier" in failed
     json.dumps(result)
+
+
+async def test_run_case_uses_the_configured_retriever(settings: Settings) -> None:
+    from app.services.citations import EvidenceSource
+    from app.services.retrieval import RetrievalResult
+
+    class Search:
+        name = "search"
+
+        async def retrieve(self, **kw: object) -> RetrievalResult:
+            return RetrievalResult(
+                sources=[
+                    EvidenceSource(
+                        "S1",
+                        "https://www.bls.gov/x",
+                        "BLS",
+                        "bls.gov",
+                        ["Jobs grew."],
+                        origin="page_text",
+                    )
+                ],
+                executed_queries=["q"],
+                backend="brave",
+            )
+
+    llm = FakeLLM(
+        json_responses={
+            "ExtractionOutput": EXTRACTION_OK,
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [{"source_id": "S1", "stance": "contradicts", "note": "n"}],
+                "verdict": "contradicted",
+                "explanation": "Jobs grew [S1].",
+                "key_findings": [],
+                "limitations": [],
+            },
+        }
+    )
+    args = argparse.Namespace(
+        skip_clipping=True, skip_verify=False, verify_from="extracted", fetch_sources=False
+    )
+    async with httpx.AsyncClient() as http:
+        result = await lv.run_case(CASE, llm, settings, http, args, Search())
+    assert "grounded_search" not in [name for name, _ in llm.calls]
+    assert result["verification"]["sources"][0]["excerpt_origin"] == "page_text"

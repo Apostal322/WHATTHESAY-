@@ -90,6 +90,23 @@ describe("App", () => {
     expect(within(alert).queryByRole("button", { name: /try again/i })).toBeNull();
   });
 
+  it("tells the user a retrieval outage is not a verdict and offers a retry", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi({
+      verifyClaim: () =>
+        Promise.reject(new ApiError({ code: "retrieval_unavailable", message: "Evidence search is temporarily unavailable. Try again shortly.", retryable: true })),
+    });
+    render(<App api={api} videoSource={staticVideoSource({ status: "unsupported", reason: "not_youtube" })} />);
+    await user.click(await screen.findByRole("button", { name: /type a claim manually/i }));
+    await user.type(screen.getByRole("textbox", { name: /claim/i }), "The Eiffel Tower was completed in 1889.");
+    await user.click(screen.getByRole("button", { name: /check this claim/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText(/not a judgement on the claim/i)).toBeInTheDocument();
+    expect(within(alert).getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /insufficient evidence/i })).toBeNull();
+  });
+
   it("supports a fully manual claim without any video", async () => {
     const user = userEvent.setup();
     const verifyClaim = vi.fn(fakeApi().verifyClaim);

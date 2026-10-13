@@ -21,6 +21,7 @@ from typing import Any, Protocol
 import httpx
 
 from app.core.cache import TTLCache
+from app.core.errors import RetrievalUnavailableError
 from app.services import prompts
 from app.services.citations import (
     EvidenceSource,
@@ -87,6 +88,12 @@ class GeminiGroundingRetriever:
             system=prompts.RETRIEVAL_SYSTEM,
             prompt=prompts.retrieval_prompt(claim=claim, queries=queries, scope_notes=scope_notes),
         )
+        if not grounded.raw_metadata_present:
+            # The model answered without running a search: nothing was retrieved.
+            raise RetrievalUnavailableError(
+                "The search step did not run, so no evidence was retrieved. Try again.",
+                diagnostics={"backend": self.name, "reason": "no_grounding_metadata"},
+            )
         candidates = build_sources(grounded)
         if candidates and self._http is not None and self._resolve:
             await resolve_redirects(candidates, self._http)
@@ -98,11 +105,7 @@ class GeminiGroundingRetriever:
             backend=self.name,
             usage=grounded.usage,
             billed_searches=len(executed),
-            empty_reason=(
-                "No grounded search results with attributable content were retrieved."
-                if grounded.raw_metadata_present
-                else "The search step returned no grounding metadata."
-            ),
+            empty_reason="No grounded search results with attributable content were retrieved.",
         )
 
 
@@ -215,15 +218,38 @@ class SearchRetriever:
                 served_by.append(outcome.response.provider)
                 degraded.update(outcome.response.degraded_engines)
 
+        errors = sorted({a.error for o, _ in outcomes for a in o.attempts if a.error})
+        if not hits and errors:
+            # Every query failed on every provider: no search happened, so this is an
+            # outage, not a lack of evidence.
+            budget_only = set(errors) == {"budget_exhausted"}
+            err = RetrievalUnavailableError(
+                "The daily evidence-search capacity has been reached. Try again tomorrow."
+                if budget_only
+                else "Evidence search is temporarily unavailable. Try again shortly.",
+                diagnostics={"stage": "search", "provider_errors": errors, "searches": attempts},
+            )
+            err.retryable = not budget_only
+            raise err
+
         terms = ClaimTerms.build(claim, queries)
         ranked = rank_hits(hits, terms, limit=self._pages)
         converted = await asyncio.gather(*(self._to_source(item, terms) for item in ranked))
         sources = [src for src, _ in converted if src is not None][: self._max_sources]
+        statuses = [status for _, status in converted]
+        if ranked and not sources and all(st.startswith("fetch_failed") for st in statuses):
+            # Results existed but no page could be read (and none had a snippet).
+            raise RetrievalUnavailableError(
+                "The evidence pages could not be retrieved. Try again shortly.",
+                diagnostics={"stage": "fetch", "fetch": statuses, "searches": attempts},
+            )
         backend = "+".join(dict.fromkeys(served_by)) or "none"
         if not hits:
-            empty = "All search providers failed or returned no results."
+            empty = "The search returned no results for this claim."
+        elif not ranked:
+            empty = "Search results were found, but none were relevant to the claim."
         else:
-            empty = "Search results were found, but none contained a passage relevant to the claim."
+            empty = "Relevant pages were read, but none contained a passage about the claim."
         return RetrievalResult(
             sources=dedupe_and_number(sources),
             executed_queries=list(hits),
@@ -242,7 +268,7 @@ class SearchRetriever:
                     }
                     for r in ranked
                 ],
-                "fetch": [status for _, status in converted],
+                "fetch": statuses,
                 "degraded_engines": sorted(degraded),
             },
         )

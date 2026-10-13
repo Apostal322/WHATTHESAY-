@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.evaluation.metrics import tokens
-from app.services.citations import is_safe_display_url, normalize_domain
+from app.services.citations import EvidenceSource, is_safe_display_url, normalize_domain
 from app.services.search import SearchHit
 
 RRF_K = 60
@@ -194,3 +194,57 @@ def extract_passages(
 def excerpt_is_verbatim(excerpt: str, paragraphs: list[str]) -> bool:
     """Citation check: a page excerpt must occur verbatim in the page it cites."""
     return any(excerpt in p for p in paragraphs)
+
+
+# ------------------------------------------------------------------ independence
+
+_SHINGLE = 5
+_MIN_SHINGLES = 8
+DUPLICATE_CONTAINMENT = 0.6
+
+
+def _shingles(text: str) -> set[tuple[str, ...]]:
+    words = tokens(text)
+    return {tuple(words[i : i + _SHINGLE]) for i in range(len(words) - _SHINGLE + 1)}
+
+
+def source_site(src: EvidenceSource) -> str:
+    """Registrable site of a source (grounding sources may only carry a domain)."""
+    return site_of(f"https://{src.domain}/") if src.domain else site_of(src.url)
+
+
+def origin_groups(sources: list[EvidenceSource]) -> dict[str, int]:
+    """Map source id -> origin group; one group per independent piece of evidence.
+
+    Sources share a group when they come from the same site, or when their text
+    is a near-copy of another source's (syndicated or republished reports). Only
+    publisher text is compared: grounding excerpts are model-written summaries,
+    whose similarity says nothing about the underlying pages.
+    """
+    parent = list(range(len(sources)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        parent[find(i)] = find(j)
+
+    sites = [source_site(s) for s in sources]
+    shingles = [
+        _shingles(" ".join(s.excerpts)) if s.origin != "grounding_summary" else set()
+        for s in sources
+    ]
+    for i in range(len(sources)):
+        for j in range(i + 1, len(sources)):
+            if sites[i] and sites[i] == sites[j]:
+                union(i, j)
+                continue
+            a, b = shingles[i], shingles[j]
+            smaller = min(len(a), len(b))
+            if smaller >= _MIN_SHINGLES and len(a & b) / smaller >= DUPLICATE_CONTAINMENT:
+                union(i, j)
+    roots: dict[int, int] = {}
+    return {s.id: roots.setdefault(find(i), len(roots)) for i, s in enumerate(sources)}
