@@ -72,13 +72,14 @@ No numerical confidence is shown, because model self-reported confidence is not 
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 108 unit/integration tests with a fake LLM |
+| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 115 unit/integration tests with a fake LLM |
 | Gemini request wire format (YouTube clip, schema, search tool) and response parsing | ✅ Verified against a mocked HTTP transport using the real SDK (google-genai 2.29) and audited against current docs ([report](docs/live-validation-report.md)) |
-| Chrome extension (MV3, side panel, content script, background) | ✅ Implemented; 35 component/unit tests; builds to `extension/dist` |
+| Chrome extension (MV3, side panel, content script, background) | ✅ Implemented; 36 component/unit tests; builds to `extension/dist` |
 | End-to-end UI ↔ backend in a real Chromium | ✅ Automated smoke test (`npm run e2e`). Uses a **fixture YouTube page** and a **scripted fake model** |
-| **Live Gemini extraction, clipping and verification** | ⚠️ **Not yet run** (no API key available). One command runs it all: `scripts/live_validation.py` |
+| **Live Gemini extraction and clipping** | ⚠️ **Partly run** (2026-10-13, `gemini-3.8-flash`): extraction succeeded on 4/6 exploratory cases; clip offsets honoured in 3/3 paired 20 s/50 s runs. Claims are unlabelled, so no accuracy yet ([report](docs/live-validation-report.md)) |
+| **Live verification** | ⛔ **0/6 completed**: the key's free-tier quota (20 requests/day/model) ran out. Re-run the failed cases with `scripts/live_validation.py --only …` |
 | **Live youtube.com page in Chrome** | ⚠️ **Not yet run** (YouTube blocked in the dev sandbox). Script: `npm run e2e:live` |
-| Accuracy, latency and cost benchmarks | ⚠️ Not measured. See [live validation report](docs/live-validation-report.md) for blockers and commands |
+| Accuracy, latency and cost benchmarks | ⚠️ Extraction only: 21–88 s (median 31 s), about $0.005–0.013 per click at assumed prices. Accuracy and verification cost not measured. Public-release decision: **NO-GO** for now ([report](docs/live-validation-report.md) §7) |
 
 ## Setup (Windows)
 
@@ -179,7 +180,7 @@ cd extension && npm run build && npm run e2e  # headless Chromium smoke test
 Interactive docs: <http://127.0.0.1:8000/docs>. All errors look like
 `{"error": {"code": "...", "message": "...", "retryable": bool}}`. The codes are
 `invalid_input`, `video_unavailable`, `missing_credentials`, `model_not_found`,
-`rate_limited`, `provider_rate_limited`, `provider_timeout`, `provider_error`,
+`rate_limited`, `provider_rate_limited`, `provider_quota_exhausted`, `provider_timeout`, `provider_error`,
 `invalid_model_output` and `payload_too_large`.
 
 ```http
@@ -224,7 +225,7 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 
 ```bash
 # backend (from backend/)
-pytest                    # 108 tests, no network, no key
+pytest                    # 115 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 

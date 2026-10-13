@@ -4,11 +4,26 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from datetime import UTC, datetime
 from typing import Any
 
 _RESERVED = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
+
+# Google API keys (AIza..., AQ....), OAuth bearer tokens and key=/token= query params.
+_SECRET_RE = re.compile(
+    r"AIza[0-9A-Za-z_\-]{20,}"
+    r"|\bAQ\.[0-9A-Za-z_\-]{20,}"
+    r"|\bya29\.[0-9A-Za-z_\-.]{20,}"
+    r"|(?i:bearer)\s+[0-9A-Za-z_\-.=]{20,}"
+    r"|(?i:(?:api_?key|key|access_token|token)=)[^&\s\"']+"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Mask credential-shaped substrings before text is logged or written to a report."""
+    return _SECRET_RE.sub("[REDACTED]", text)
 
 
 class JsonFormatter(logging.Formatter):

@@ -36,6 +36,7 @@ import httpx
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.core.logging import configure_logging
 from app.evaluation.live import (
     ClipRun,
     LiveCase,
@@ -67,6 +68,11 @@ def _f1(predicted: str | None, case: LiveCase) -> float | None:
     return round(token_f1(predicted or "", case.ground_truth_claim or ""), 3)
 
 
+def _stage_error(exc: AppError) -> dict[str, Any]:
+    """A failed stage, kept with its sanitized provider diagnostics; never a fallback result."""
+    return {"error": exc.code, "message": exc.message, "diagnostics": exc.diagnostics}
+
+
 def _cost(usage: Usage, settings: Settings, searches: int = 0) -> float | None:
     return to_token_usage(usage, settings, searches).estimated_cost_usd
 
@@ -85,6 +91,7 @@ async def run_extraction(case: LiveCase, svc: ExtractionService) -> dict[str, An
         "status": resp.status,
         "claim": resp.claim,
         "claim_type": resp.claim_type,
+        "context": resp.context,
         "evidence_from_video": resp.evidence_from_video,
         "is_exact_quote": resp.is_exact_quote,
         "reason": resp.reason,
@@ -192,9 +199,11 @@ async def run_verification(
     claim: str,
     svc: VerificationService,
     http: httpx.AsyncClient | None,
+    context: str | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    resp = await svc.verify(VerifyRequest(claim=claim, language=case.language))
+    # Mirror the extension: a claim taken from the video is verified with its video context.
+    resp = await svc.verify(VerifyRequest(claim=claim, context=context, language=case.language))
     sources = []
     for s in resp.sources:
         entry: dict[str, Any] = s.model_dump()
@@ -203,6 +212,7 @@ async def run_verification(
         sources.append(entry)
     return {
         "claim_verified": claim,
+        "context_sent": context,
         "verdict": resp.verdict,
         "reference_verdict": case.reference_verdict,
         "explanation": resp.explanation,
@@ -235,11 +245,13 @@ async def run_case(
         try:
             out[name] = await fn()
         except AppError as exc:
-            out[name] = {"error": exc.code, "message": exc.message}
+            out[name] = _stage_error(exc)
     if not args.skip_verify:
         extracted = (out.get("extraction") or {}).get("claim")
         use_extracted = args.verify_from == "extracted" or case.exploratory
-        claim = extracted if use_extracted and extracted else case.ground_truth_claim
+        from_video = bool(use_extracted and extracted)
+        claim = extracted if from_video else case.ground_truth_claim
+        context = (out.get("extraction") or {}).get("context") if from_video else None
         if not claim:
             out["verification"] = {"error": "no_claim", "message": "Nothing to verify."}
             return out
@@ -249,9 +261,10 @@ async def run_case(
                 claim,
                 VerificationService(llm, settings, http),
                 http if args.fetch_sources else None,
+                context,
             )
         except AppError as exc:
-            out["verification"] = {"error": exc.code, "message": exc.message}
+            out["verification"] = _stage_error(exc)
     return out
 
 
@@ -347,6 +360,32 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
             f"{v['latency_ms']} | {_fmt(v['usage'].get('estimated_cost_usd'))} |"
         )
 
+    failures = [
+        (r["case"]["id"], stage, r[stage])
+        for r in results
+        for stage in ("extraction", "clipping", "verification")
+        if isinstance(r.get(stage), dict) and "error" in r[stage]
+    ]
+    lines += [
+        "",
+        "## Failed stages (excluded from the tables' statistics)",
+        "",
+        "| case | stage | error | operation | HTTP | provider status | quota | retry delay | provider message |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for case_id, stage, err in failures:
+        d = err.get("diagnostics") or {}
+        quota = ", ".join(
+            str(q.get("id") or q.get("metric")) for q in d.get("quota_violations") or []
+        )
+        lines.append(
+            f"| {case_id} | {stage} | {err['error']} | {_fmt(d.get('operation'))} | {_fmt(d.get('http_status'))} | "
+            f"{_fmt(d.get('provider_status'))} | {_short(quota or None, 80)} | {_fmt(d.get('retry_delay'))} | "
+            f"{_short(d.get('provider_message') or err.get('message'), 120)} |"
+        )
+    if not failures:
+        lines.append("| (none) | | | | | | | | |")
+
     lines += ["", "## Source review sheet (fill in the last column by hand)", ""]
     for r in results:
         v = r.get("verification")
@@ -433,6 +472,7 @@ def main() -> int:
     ap.add_argument("--skip-verify", action="store_true")
     ap.add_argument("--verify-from", choices=["ground_truth", "extracted"], default="ground_truth")
     ap.add_argument("--skip-preflight", action="store_true")
+    ap.add_argument("--only", help="Comma-separated case ids to run (e.g. to retry failed cases)")
     ap.add_argument("--price-in", type=float, help="USD per 1M input tokens")
     ap.add_argument("--price-out", type=float, help="USD per 1M output tokens")
     ap.add_argument("--price-search-1k", type=float, help="USD per 1000 grounding search queries")
@@ -441,6 +481,13 @@ def main() -> int:
     lines = Path(args.cases).read_text(encoding="utf-8").splitlines()
     all_cases = [LiveCase.model_validate(json.loads(line)) for line in lines if line.strip()]
     cases = [c for c in all_cases if not c.is_placeholder()]
+    if args.only:
+        wanted = {i.strip() for i in args.only.split(",") if i.strip()}
+        unknown = wanted - {c.id for c in cases}
+        if unknown:
+            print(f"Unknown case ids: {sorted(unknown)}", file=sys.stderr)
+            return 2
+        cases = [c for c in cases if c.id in wanted]
     if not cases:
         print("No filled-in cases (rows containing 'REPLACE' are skipped).", file=sys.stderr)
         return 2
@@ -455,6 +502,7 @@ def main() -> int:
         if getattr(args, flag) is not None:
             updates[field] = getattr(args, flag)
     settings = base.model_copy(update=updates)
+    configure_logging("WARNING")  # JSON lines; provider diagnostics are already redacted
     key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None
     if not key:
         print("GEMINI_API_KEY is not set (see .env.example). Nothing was run.", file=sys.stderr)

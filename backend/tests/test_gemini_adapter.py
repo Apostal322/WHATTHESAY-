@@ -14,6 +14,7 @@ from app.core.errors import (
     MissingCredentialsError,
     ModelNotFoundError,
     ProviderError,
+    ProviderQuotaExhaustedError,
     ProviderRateLimitedError,
     VideoUnavailableError,
 )
@@ -150,3 +151,73 @@ async def test_timeout_is_classified() -> None:
 
     with pytest.raises(ProviderTimeoutError):
         await _client(handler).grounded_search(model="m", system="s", prompt="p")
+
+
+def _quota_body(quota_id: str, retry_delay: str, message: str) -> dict[str, Any]:
+    # Shape of the free-tier daily-cap 429 observed in the live run (docs/live-validation-report.md).
+    return {
+        "error": {
+            "code": 429,
+            "message": message,
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [
+                        {
+                            "quotaMetric": "generativelanguage.googleapis.com/"
+                            "generate_content_free_tier_requests",
+                            "quotaId": quota_id,
+                            "quotaDimensions": {"location": "global", "model": "m"},
+                            "quotaValue": "20",
+                        }
+                    ],
+                },
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry_delay},
+            ],
+        }
+    }
+
+
+async def test_daily_quota_is_not_retryable_and_carries_sanitized_diagnostics() -> None:
+    leaked = "AIzaSyA1234567890abcdefghijklmnopqrstu"
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json=_quota_body(
+                "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+                "79080s",
+                f"You exceeded your current quota (key={leaked}).",
+            ),
+        )
+
+    with pytest.raises(ProviderQuotaExhaustedError) as info:
+        await _client(handler).grounded_search(model="m", system="s", prompt="p")
+    err = info.value
+    assert err.retryable is False
+    diag = err.diagnostics or {}
+    assert diag["operation"] == "grounded_search"
+    assert diag["http_status"] == 429
+    assert diag["provider_status"] == "RESOURCE_EXHAUSTED"
+    assert diag["quota_violations"][0]["id"].startswith("GenerateRequestsPerDay")
+    assert diag["retry_delay"] == "79080s"
+    assert leaked not in json.dumps(diag)
+    assert leaked not in err.message
+
+
+async def test_per_minute_429_stays_retryable_rate_limit() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json=_quota_body(
+                "GenerateRequestsPerMinutePerProjectPerModel-FreeTier", "17s", "Quota exceeded"
+            ),
+        )
+
+    with pytest.raises(ProviderRateLimitedError) as info:
+        await _client(handler).generate_json(
+            model="m", system="s", prompt="p", schema=ExtractionOutput, video=CLIP
+        )
+    assert info.value.retryable is True
+    assert (info.value.diagnostics or {})["operation"] == "video_extraction"

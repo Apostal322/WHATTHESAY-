@@ -85,10 +85,12 @@ async def test_run_case_and_report(settings: Settings) -> None:
         result = await lv.run_case(CASE, llm, settings, http, args)
 
     assert result["extraction"]["claim_f1"] == 1.0
+    assert result["extraction"]["context"] == EXTRACTION_OK["context"]
     assert result["clipping"]["verdict"] == "clipping_honoured"
     assert [r["window_sec"] for r in result["clipping"]["runs"]] == [20, 50]
     v = result["verification"]
     assert v["verdict"] == "contradicted"
+    assert v["context_sent"] is None  # ground-truth claims carry no model context
     assert v["sources"][0]["page_check"]["fetched"] is True
     assert v["sources"][0]["page_check"]["needs_manual_review"] is False
 
@@ -151,6 +153,7 @@ async def test_exploratory_case_verifies_extracted_claim(settings: Settings) -> 
         result = await lv.run_case(case, llm, settings, http, args)
     assert result["extraction"]["claim_f1"] is None
     assert result["verification"]["claim_verified"] == EXTRACTION_OK["claim"]
+    assert result["verification"]["context_sent"] == EXTRACTION_OK["context"]
     assert "(exploratory)" in lv.render_report(
         {
             "run_at": "t",
@@ -175,3 +178,46 @@ def test_repo_live_cases_file_is_valid() -> None:
     ]
     assert {c.language for c in cases} == {"en", "ru"}
     assert not any(c.is_placeholder() for c in cases)
+
+
+async def test_failed_stage_keeps_diagnostics_and_is_listed_separately(settings: Settings) -> None:
+    from app.core.errors import ProviderQuotaExhaustedError
+
+    diag = {
+        "operation": "video_extraction",
+        "http_status": 429,
+        "provider_status": "RESOURCE_EXHAUSTED",
+        "quota_violations": [{"id": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}],
+        "retry_delay": "79080s",
+    }
+    llm = FakeLLM(
+        json_responses={
+            "ExtractionOutput": ProviderQuotaExhaustedError("used up", diagnostics=diag)
+        }
+    )
+    args = argparse.Namespace(
+        skip_clipping=True, skip_verify=False, verify_from="ground_truth", fetch_sources=False
+    )
+    case = CASE.model_copy(update={"ground_truth_claim": None, "verified_by": None})
+    async with httpx.AsyncClient() as http:
+        result = await lv.run_case(case, llm, settings, http, args)
+    assert result["extraction"]["diagnostics"] == diag
+    assert "claim" not in result["extraction"]  # no fallback claim is substituted
+    assert result["verification"]["error"] == "no_claim"
+    report = lv.render_report(
+        {
+            "run_at": "t",
+            "extraction_model": "m",
+            "verification_model": "m",
+            "window": "w",
+            "fps": 0.5,
+            "resolution": "low",
+            "prices": {},
+            "preflight": "skipped",
+        },
+        [result],
+    )
+    failed = report.split("## Failed stages")[1].split("## Source review sheet")[0]
+    assert "| en-test | extraction | provider_quota_exhausted | video_extraction | 429 |" in failed
+    assert "GenerateRequestsPerDayPerProjectPerModel-FreeTier" in failed
+    json.dumps(result)

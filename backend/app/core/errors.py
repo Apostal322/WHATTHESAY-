@@ -6,15 +6,20 @@ show a specific message instead of a generic failure.
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class AppError(Exception):
     code: str = "internal_error"
     status_code: int = 500
     retryable: bool = False
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, diagnostics: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.message = message
+        # Sanitized operator-facing detail (provider status, quota id, ...). Logged and
+        # recorded by evaluation scripts; never returned to API clients.
+        self.diagnostics = diagnostics
 
 
 class MissingCredentialsError(AppError):
@@ -47,6 +52,14 @@ class ProviderRateLimitedError(AppError):
     code = "provider_rate_limited"
     status_code = 429
     retryable = True
+
+
+class ProviderQuotaExhaustedError(AppError):
+    """The key's quota (e.g. a free-tier daily request cap) is used up; retrying soon won't help."""
+
+    code = "provider_quota_exhausted"
+    status_code = 429
+    retryable = False
 
 
 class ProviderTimeoutError(AppError):

@@ -76,6 +76,20 @@ describe("App", () => {
     expect(await screen.findByRole("textbox", { name: /claim/i })).toHaveValue("");
   });
 
+  it("explains a used-up provider quota without offering a pointless retry", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi({
+      extractClaim: () =>
+        Promise.reject(new ApiError({ code: "provider_quota_exhausted", message: "The Gemini API quota for this key is used up.", retryable: false })),
+    });
+    render(<App api={api} videoSource={staticVideoSource(OK_CONTEXT)} />);
+    await user.click(await screen.findByRole("button", { name: /verify claim at/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText(/free-tier daily limit/i)).toBeInTheDocument();
+    expect(within(alert).queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
   it("supports a fully manual claim without any video", async () => {
     const user = userEvent.setup();
     const verifyClaim = vi.fn(fakeApi().verifyClaim);

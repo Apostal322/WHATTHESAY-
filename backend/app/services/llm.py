@@ -19,14 +19,17 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.core.errors import (
+    AppError,
     InvalidModelOutputError,
     MissingCredentialsError,
     ModelNotFoundError,
     ProviderError,
+    ProviderQuotaExhaustedError,
     ProviderRateLimitedError,
     ProviderTimeoutError,
     VideoUnavailableError,
 )
+from app.core.logging import redact_secrets
 
 log = logging.getLogger(__name__)
 
@@ -222,7 +225,13 @@ class GeminiClient:
         )
 
     async def _call(
-        self, *, model: str, contents: Any, config: types.GenerateContentConfig, video: bool
+        self,
+        *,
+        model: str,
+        contents: Any,
+        config: types.GenerateContentConfig,
+        video: bool,
+        operation: str,
     ) -> Any:
         if not self._has_key:
             raise MissingCredentialsError(
@@ -237,12 +246,24 @@ class GeminiClient:
                 timeout=self._timeout_sec * 2.5,
             )
         except (TimeoutError, httpx.TimeoutException) as exc:
-            raise ProviderTimeoutError("The AI provider did not respond in time.") from exc
+            raise ProviderTimeoutError(
+                "The AI provider did not respond in time.",
+                diagnostics={
+                    "operation": operation,
+                    "model": model,
+                    "exception": type(exc).__name__,
+                },
+            ) from exc
         except genai_errors.APIError as exc:
-            raise _classify_api_error(exc, model=model, video=video) from exc
+            raise _classify_api_error(exc, model=model, video=video, operation=operation) from exc
         except httpx.HTTPError as exc:
             raise ProviderError(
-                f"Network error talking to the AI provider: {type(exc).__name__}"
+                f"Network error talking to the AI provider: {type(exc).__name__}",
+                diagnostics={
+                    "operation": operation,
+                    "model": model,
+                    "exception": type(exc).__name__,
+                },
             ) from exc
 
     async def generate_json(
@@ -282,6 +303,7 @@ class GeminiClient:
             contents=[types.Content(role="user", parts=parts)],
             config=config,
             video=video is not None,
+            operation="video_extraction" if video is not None else "structured_json",
         )
         return LLMResult(text=_response_text(resp), usage=_usage_from(resp), model=model)
 
@@ -290,7 +312,9 @@ class GeminiClient:
             system_instruction=system,
             tools=[types.Tool(google_search=types.GoogleSearch())],
         )
-        resp = await self._call(model=model, contents=prompt, config=config, video=False)
+        resp = await self._call(
+            model=model, contents=prompt, config=config, video=False, operation="grounded_search"
+        )
         sources, supports, queries, present = parse_grounding(resp)
         try:
             text = _response_text(resp)
@@ -307,12 +331,76 @@ class GeminiClient:
         )
 
 
-def _classify_api_error(exc: genai_errors.APIError, *, model: str, video: bool) -> Exception:
+def _provider_diagnostics(
+    exc: genai_errors.APIError, *, model: str, operation: str
+) -> dict[str, Any]:
+    """Sanitized, operator-facing summary of a provider error (never sent to clients)."""
+    diag: dict[str, Any] = {
+        "operation": operation,
+        "model": model,
+        "http_status": getattr(exc, "code", None),
+        "provider_status": getattr(exc, "status", None),
+        "provider_message": redact_secrets((getattr(exc, "message", None) or str(exc))[:500]),
+    }
+    body = getattr(exc, "details", None)
+    error = body.get("error", body) if isinstance(body, dict) else {}
+    details = error.get("details") if isinstance(error, dict) else None
+    for item in details if isinstance(details, list) else []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("@type", ""))
+        if kind.endswith("QuotaFailure"):
+            diag["quota_violations"] = [
+                {
+                    "metric": v.get("quotaMetric"),
+                    "id": v.get("quotaId"),
+                    "dimensions": v.get("quotaDimensions"),
+                    "value": v.get("quotaValue"),
+                }
+                for v in item.get("violations", [])
+                if isinstance(v, dict)
+            ]
+        elif kind.endswith("RetryInfo"):
+            diag["retry_delay"] = str(item.get("retryDelay", ""))
+    return diag
+
+
+def _classify_api_error(
+    exc: genai_errors.APIError, *, model: str, video: bool, operation: str = "unknown"
+) -> AppError:
+    diag = _provider_diagnostics(exc, model=model, operation=operation)
+    error = _classify(exc, model=model, video=video, diag=diag)
+    error.diagnostics = diag
+    log.warning("provider_error", extra={"error_code": error.code, **diag})
+    return error
+
+
+# A 429 whose retry delay is at least this long is a used-up quota, not a burst limit.
+_QUOTA_EXHAUSTED_MIN_DELAY_SEC = 3600
+
+
+def _is_quota_exhausted(diag: dict[str, Any]) -> bool:
+    if any("perday" in str(v.get("id", "")).lower() for v in diag.get("quota_violations") or []):
+        return True
+    delay = str(diag.get("retry_delay", "")).removesuffix("s")
+    try:
+        return float(delay) >= _QUOTA_EXHAUSTED_MIN_DELAY_SEC
+    except ValueError:
+        return False
+
+
+def _classify(
+    exc: genai_errors.APIError, *, model: str, video: bool, diag: dict[str, Any]
+) -> AppError:
     code = getattr(exc, "code", None) or 0
     message = (getattr(exc, "message", None) or str(exc))[:300]
     lowered = message.lower()
-    log.warning("provider_error", extra={"status": code, "provider_message": message})
 
+    if code == 429 and _is_quota_exhausted(diag):
+        return ProviderQuotaExhaustedError(
+            "The Gemini API quota for this key is used up (for example the free-tier daily "
+            "request limit). Try again after it resets, or use a key with a higher quota."
+        )
     if code == 429:
         return ProviderRateLimitedError(
             "The AI provider rate-limited the request. Try again shortly."
