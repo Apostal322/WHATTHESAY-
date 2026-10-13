@@ -200,10 +200,13 @@ class GeminiClient:
         timeout_sec: float,
         max_retries: int,
         transport: httpx.AsyncBaseTransport | None = None,
+        fallback_model: str | None = None,
     ) -> None:
         # A missing key is reported on first use, so input validation errors surface first
         # and the server can start (and serve /health) without credentials.
         self._has_key = bool(api_key)
+        # Used once per call, only when the requested model is overloaded (HTTP 503).
+        self._fallback_model = fallback_model
         self._timeout_sec = timeout_sec
         self._client = genai.Client(
             api_key=api_key or "missing",
@@ -266,6 +269,25 @@ class GeminiClient:
                 },
             ) from exc
 
+    async def _call_with_fallback(self, *, model: str, **kw: Any) -> tuple[Any, str]:
+        """Call `model`; if it is overloaded (503), try the fallback model once.
+
+        Returns the response and the model that actually produced it. Quota (429),
+        credential and input errors are never retried on another model.
+        """
+        try:
+            return await self._call(model=model, **kw), model
+        except AppError as exc:
+            fallback = self._fallback_model
+            overloaded = (exc.diagnostics or {}).get("http_status") == 503
+            if not (overloaded and fallback and fallback != model):
+                raise
+            log.warning(
+                "model_fallback",
+                extra={"from_model": model, "to_model": fallback, "operation": kw["operation"]},
+            )
+            return await self._call(model=fallback, **kw), fallback
+
     async def generate_json(
         self,
         *,
@@ -298,21 +320,21 @@ class GeminiClient:
             response_schema=schema,
             **config_kwargs,
         )
-        resp = await self._call(
+        resp, used = await self._call_with_fallback(
             model=model,
             contents=[types.Content(role="user", parts=parts)],
             config=config,
             video=video is not None,
             operation="video_extraction" if video is not None else "structured_json",
         )
-        return LLMResult(text=_response_text(resp), usage=_usage_from(resp), model=model)
+        return LLMResult(text=_response_text(resp), usage=_usage_from(resp), model=used)
 
     async def grounded_search(self, *, model: str, system: str, prompt: str) -> GroundedResult:
         config = types.GenerateContentConfig(
             system_instruction=system,
             tools=[types.Tool(google_search=types.GoogleSearch())],
         )
-        resp = await self._call(
+        resp, used = await self._call_with_fallback(
             model=model, contents=prompt, config=config, video=False, operation="grounded_search"
         )
         sources, supports, queries, present = parse_grounding(resp)
@@ -326,7 +348,7 @@ class GeminiClient:
             supports=supports,
             queries=queries,
             usage=_usage_from(resp),
-            model=model,
+            model=used,
             raw_metadata_present=present,
         )
 

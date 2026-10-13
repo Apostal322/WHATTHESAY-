@@ -466,3 +466,40 @@ async def test_snippet_only_verdict_is_flagged_and_context_reaches_the_evaluator
     eval_prompt = llm.calls[-1][1]["prompt"]
     assert "ABC News debate, 10 September 2024" in eval_prompt
     assert "keep attributions" in eval_prompt
+
+
+async def test_models_used_records_each_step(settings: Settings) -> None:
+    class FallbackLLM(FakeLLM):
+        """Analysis served by the configured model; later steps by a fallback."""
+
+        async def generate_json(self, **kw):  # type: ignore[no-untyped-def]
+            res = await super().generate_json(**kw)
+            if kw["schema"].__name__ == "EvaluationOutput":
+                return type(res)(text=res.text, usage=res.usage, model="gemini-3.6-flash")
+            return res
+
+        async def grounded_search(self, **kw):  # type: ignore[no-untyped-def]
+            from dataclasses import replace
+
+            return replace(await super().grounded_search(**kw), model="gemini-3.6-flash")
+
+    llm = FallbackLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [{"source_id": "S1", "stance": "contradicts", "note": "n"}],
+                "verdict": "contradicted",
+                "explanation": "Growth [S1].",
+                "key_findings": [],
+                "limitations": [],
+            },
+        },
+        grounded=GROUNDED,
+    )
+    resp = await _service(llm, settings).verify(VerifyRequest(claim=CLAIM))
+    assert resp.model == "fake-model"  # configured model, unchanged
+    assert resp.models_used == {
+        "analysis": "fake-model",
+        "retrieval": "gemini-3.6-flash",
+        "evaluation": "gemini-3.6-flash",
+    }

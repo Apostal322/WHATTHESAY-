@@ -91,6 +91,7 @@ async def run_extraction(case: LiveCase, svc: ExtractionService) -> dict[str, An
     )
     return {
         "status": resp.status,
+        "model": resp.model,
         "claim": resp.claim,
         "claim_type": resp.claim_type,
         "context": resp.context,
@@ -214,6 +215,7 @@ async def run_verification(
         sources.append(entry)
     return {
         "claim_verified": claim,
+        "models_used": resp.models_used,
         "context_sent": context,
         "verdict": resp.verdict,
         "reference_verdict": case.reference_verdict,
@@ -293,7 +295,7 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
         "# Live validation report",
         "",
         f"- Run: {meta['run_at']}",
-        f"- Extraction model: `{meta['extraction_model']}` · verification model: `{meta['verification_model']}`",
+        f"- Extraction model: `{meta['extraction_model']}` · verification model: `{meta['verification_model']}` · fallback: `{meta.get('fallback_model')}`",
         f"- Window defaults: {meta['window']} · fps {meta['fps']} · media resolution {meta['resolution']}",
         f"- Retrieval: {meta.get('retrieval', 'gemini_grounding')}",
         f"- Prices (USD): {meta['prices']}",
@@ -301,20 +303,20 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
         "",
         "## Extraction (product path)",
         "",
-        "| case | lang | t | ground truth | extracted | claim F1 | exact quote? | latency ms | prompt tok | cost $ |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| case | lang | t | ground truth | extracted | claim F1 | exact quote? | model | latency ms | prompt tok | cost $ |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         c, e = r["case"], r.get("extraction", {})
         if "error" in e:
             lines.append(
-                f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'] or '(exploratory)')} | **{e['error']}** | | | | | |"
+                f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'] or '(exploratory)')} | **{e['error']}** | | | | | | |"
             )
             continue
         lines.append(
             f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'] or '(exploratory)')} | "
             f"{_short(e.get('claim') or e.get('reason'))} | {_fmt(e.get('claim_f1'), 2)} | {e.get('is_exact_quote')} | "
-            f"{e.get('latency_ms')} | {e.get('usage', {}).get('prompt_tokens')} | {_fmt(e.get('usage', {}).get('estimated_cost_usd'))} |"
+            f"{_fmt(e.get('model'))} | {e.get('latency_ms')} | {e.get('usage', {}).get('prompt_tokens')} | {_fmt(e.get('usage', {}).get('estimated_cost_usd'))} |"
         )
 
     lines += [
@@ -343,15 +345,15 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
         "",
         "## Verification",
         "",
-        "| case | claim checked | verdict | reference | sources | indep. domains | searches | pages needing review | latency ms | cost $ |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| case | claim checked | verdict | reference | sources | indep. domains | searches | pages needing review | models | latency ms | cost $ |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
         v = r.get("verification")
         if not v:
             continue
         if "error" in v:
-            lines.append(f"| {r['case']['id']} | | **{v['error']}** | | | | | | | |")
+            lines.append(f"| {r['case']['id']} | | **{v['error']}** | | | | | | | | |")
             continue
         checked = [s.get("page_check") for s in v["sources"] if s.get("page_check")]
         review = (
@@ -362,7 +364,7 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
         lines.append(
             f"| {r['case']['id']} | {_short(v['claim_verified'], 50)} | **{v['verdict']}** | {_fmt(v['reference_verdict'])} | "
             f"{len(v['sources'])} | {v['independent_source_count']} | {v['usage'].get('search_queries')} | {review} | "
-            f"{v['latency_ms']} | {_fmt(v['usage'].get('estimated_cost_usd'))} |"
+            f"{_short(', '.join(f'{k}: {m}' for k, m in (v.get('models_used') or {}).items()), 80)} | {v['latency_ms']} | {_fmt(v['usage'].get('estimated_cost_usd'))} |"
         )
 
     failures = [
@@ -522,14 +524,19 @@ def main() -> int:
     preflight = "skipped"
     if not args.skip_preflight:
         ok, preflight = preflight_models(
-            key, {settings.extraction_model, settings.verification_model}
+            key,
+            {settings.extraction_model, settings.verification_model}
+            | ({settings.fallback_model} if settings.fallback_model else set()),
         )
         print(f"preflight: {preflight}", file=sys.stderr)
         if not ok:
             return 1
 
     llm = GeminiClient(
-        key, timeout_sec=settings.request_timeout_sec, max_retries=settings.max_retries
+        key,
+        timeout_sec=settings.request_timeout_sec,
+        max_retries=settings.max_retries,
+        fallback_model=settings.fallback_model,
     )
     results = asyncio.run(run_all(cases, llm, settings, args))
 
@@ -537,6 +544,7 @@ def main() -> int:
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "extraction_model": settings.extraction_model,
         "verification_model": settings.verification_model,
+        "fallback_model": settings.fallback_model,
         "window": f"-{settings.window_before_sec}s/+{settings.window_after_sec}s",
         "retrieval": settings.retrieval_backend
         + (f" ({settings.search_providers})" if settings.retrieval_backend == "search" else ""),

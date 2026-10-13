@@ -149,6 +149,11 @@ class VerifyResponse(BaseModel):
         description="Deterministic post-checks that changed or qualified the model's output."
     )
     model: str
+    models_used: dict[str, str] = Field(
+        default_factory=dict,
+        description="Model that actually served each step (analysis, retrieval, evaluation); "
+        "differs from `model` when the fallback model was used.",
+    )
     latency_ms: int
     cached: bool = False
     usage: TokenUsage

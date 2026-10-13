@@ -54,6 +54,7 @@ class RetrievalResult:
     # Search fees in USD when known. None for grounding: priced from settings downstream.
     search_cost_usd: float | None = None
     empty_reason: str = "No citable sources were retrieved."
+    model: str | None = None  # model that served retrieval, when a model was involved
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
@@ -104,6 +105,7 @@ class GeminiGroundingRetriever:
             executed_queries=executed,
             backend=self.name,
             usage=grounded.usage,
+            model=grounded.model,
             billed_searches=len(executed),
             empty_reason="No grounded search results with attributable content were retrieved.",
         )

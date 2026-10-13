@@ -235,6 +235,59 @@ grounding-only citations, deterministic guardrails) is not what blocks launch. *
 - extraction latency is under about 10–15 s;
 - a hosted backend with per-user limits and a billed key is in place.
 
+## 7b. First end-to-end fact-check attempt (2026-10-13, later the same day): not completed
+
+The goal was one complete grounded fact-check of `en-debate-1200`, the ABC News debate of
+10 September 2024 at about 20:00. Gemini grounding needs 4 requests (extraction, analysis, grounded
+search, evaluation): about $0.05–0.09 at the assumed paid prices, $0 on the free tier.
+
+**No claim, verdict or source was produced. Nothing below is a fact-check result.**
+
+`gemini-3.8-flash` (the configured model; the §2 benchmarks were also run on it):
+
+| Time (UTC) | Operation | Attempts | Result |
+|---|---|---|---|
+| 12:50 | video extraction | 1 (SDK retries off) | 503 `UNAVAILABLE`, "This model is currently experiencing high demand" |
+| 12:52 | video extraction | ≤3 (2 SDK retries) | same 503 |
+| 13:03 | video extraction | ≤3 | same 503 |
+| 14:06 | video extraction | ≤3 | same 503 |
+
+`gemini-3.6-flash` (fallback model, separate from the 3.8 benchmarks; the §2 benchmarks do **not**
+apply to it):
+
+| Time (UTC) | Operation | Attempts | Result |
+|---|---|---|---|
+| 15:58 | availability test (tiny text-only JSON request) | 1 (no retries) | 503 `UNAVAILABLE`, same message |
+
+**Conclusions:**
+
+- The blocker is provider capacity (HTTP 503), not our quota (that would be a 429), not credentials
+  and not the video.
+- Whether the daily quota has reset is still unknown: a 503 says nothing about quota.
+- The manual-claim path cannot get around it, because analysis, grounded search and evaluation use
+  the same Gemini models.
+- No downstream step ran after a failure, so nothing billable was spent.
+
+**Changes made for the next attempt (tested offline):**
+
+- `YOUVERIFY_FALLBACK_MODEL` (optional): each call is tried once on the fallback model, only when the
+  configured model returns 503. Quota and other errors never fall back.
+- Every response records the model that actually served each step: extraction `model`; verification
+  `models_used` per step (analysis, retrieval, evaluation). Live reports show both, so 3.6 and 3.8
+  results cannot be mixed up.
+
+**Next attempt** (one run, no loop):
+
+```bash
+YOUVERIFY_EXTRACTION_MODEL=gemini-3.6-flash YOUVERIFY_VERIFICATION_MODEL=gemini-3.6-flash \
+YOUVERIFY_MAX_RETRIES=1 YOUVERIFY_RESOLVE_REDIRECTS=false \
+python scripts/live_validation.py eval/live_cases.jsonl --only en-debate-1200 \
+    --skip-clipping --verify-from extracted --fetch-sources \
+    --price-in 0.75 --price-out 3.75 --price-search-1k 14
+```
+
+Alternatively keep 3.8 as primary and set `YOUVERIFY_FALLBACK_MODEL=gemini-3.6-flash`.
+
 ## 8. Remaining steps
 
 1. Re-run the failed stages (§4 command) on a billed key or after the free-tier reset, then fill in the

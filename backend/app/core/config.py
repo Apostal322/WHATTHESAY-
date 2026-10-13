@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     verification_model: str = Field(
         default="gemini-3.8-flash", alias="YOUVERIFY_VERIFICATION_MODEL"
     )
+    # Tried once per call, only when the configured model is overloaded (HTTP 503).
+    # Unset = no fallback. Responses record which model actually served each step.
+    fallback_model: str | None = Field(default=None, alias="YOUVERIFY_FALLBACK_MODEL")
 
     # --- Video window ---------------------------------------------------------
     # The user usually clicks *after* hearing the statement, so the window is

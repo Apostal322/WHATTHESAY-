@@ -221,3 +221,68 @@ async def test_per_minute_429_stays_retryable_rate_limit() -> None:
         )
     assert info.value.retryable is True
     assert (info.value.diagnostics or {})["operation"] == "video_extraction"
+
+
+def _fallback_client(handler: Any, fallback: str | None = "gemini-3.6-flash") -> GeminiClient:
+    return GeminiClient(
+        "test-key",
+        timeout_sec=5,
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+        fallback_model=fallback,
+    )
+
+
+def _overloaded_unless(model: str) -> Any:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        if model in req.url.path:
+            return httpx.Response(200, json=_ok_body())
+        return httpx.Response(
+            503,
+            json={"error": {"code": 503, "message": "high demand", "status": "UNAVAILABLE"}},
+        )
+
+    handler.seen = seen  # type: ignore[attr-defined]
+    return handler
+
+
+async def test_overloaded_model_falls_back_once_and_reports_the_model_used() -> None:
+    handler = _overloaded_unless("gemini-3.6-flash")
+    client = _fallback_client(handler)
+    res = await client.generate_json(
+        model="gemini-3.8-flash", system="s", prompt="p", schema=ExtractionOutput, video=CLIP
+    )
+    assert res.model == "gemini-3.6-flash"
+    assert [p.split("/")[-1] for p in handler.seen] == [
+        "gemini-3.8-flash:generateContent",
+        "gemini-3.6-flash:generateContent",
+    ]
+    grounded = await client.grounded_search(model="gemini-3.8-flash", system="s", prompt="p")
+    assert grounded.model == "gemini-3.6-flash"
+
+
+async def test_quota_errors_never_fall_back() -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        return httpx.Response(429, json=_quota_body("PerDay", "79080s", "quota"))
+
+    with pytest.raises(ProviderQuotaExhaustedError):
+        await _fallback_client(handler).generate_json(
+            model="gemini-3.8-flash", system="s", prompt="p", schema=ExtractionOutput
+        )
+    assert len(seen) == 1
+
+
+async def test_no_fallback_configured_surfaces_the_overload() -> None:
+    handler = _overloaded_unless("never")
+    with pytest.raises(ProviderError) as info:
+        await _fallback_client(handler, fallback=None).generate_json(
+            model="gemini-3.8-flash", system="s", prompt="p", schema=ExtractionOutput
+        )
+    assert (info.value.diagnostics or {})["http_status"] == 503
+    assert len(handler.seen) == 1

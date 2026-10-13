@@ -51,6 +51,7 @@ class AppState:
                 key.get_secret_value() if key else None,
                 timeout_sec=self.settings.request_timeout_sec,
                 max_retries=self.settings.max_retries,
+                fallback_model=self.settings.fallback_model,
             )
         return self.llm
 

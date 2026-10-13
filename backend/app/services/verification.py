@@ -161,6 +161,7 @@ class VerificationService:
             schema=ClaimAnalysisOutput,
         )
         usage += res.usage
+        models_used = {"analysis": res.model}
         analysis = parse_model_json(res.text, ClaimAnalysisOutput)
         normalized = clip(analysis.normalized_claim, 1000) or req.claim
         queries = [q for q in (clip(x, 200) for x in analysis.search_queries) if q][:4] or [
@@ -173,6 +174,7 @@ class VerificationService:
             billed = retrieval.billed_searches if retrieval else 0
             search_cost = retrieval.search_cost_usd if retrieval else None
             resp = VerifyResponse(
+                models_used=dict(models_used),
                 claim=req.claim,
                 normalized_claim=normalized,
                 claim_type=analysis.claim_type,
@@ -222,6 +224,8 @@ class VerificationService:
             language=req.language,
         )
         usage += retrieval.usage
+        if retrieval.model:
+            models_used["retrieval"] = retrieval.model
         retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
         sources = retrieval.sources
         executed_queries = retrieval.executed_queries
@@ -256,6 +260,7 @@ class VerificationService:
             schema=EvaluationOutput,
         )
         usage += res.usage
+        models_used["evaluation"] = res.model
         evaluation = parse_model_json(res.text, EvaluationOutput)
 
         # --- Step F: citation integrity + guardrails ---------------------------
