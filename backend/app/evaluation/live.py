@@ -31,9 +31,19 @@ class LiveCase(BaseModel):
     timestamp_sec: float = Field(ge=0)
     language: Literal["auto", "en", "ru"] = "auto"
     duration_sec: float | None = Field(default=None, gt=0, description="Full video length.")
-    ground_truth_claim: str = Field(description="What a human heard just before timestamp_sec.")
-    verified_by: str = Field(description="Who checked the statement against the video, and when.")
+    ground_truth_claim: str | None = Field(
+        default=None,
+        description="What a human heard just before timestamp_sec. None = exploratory case: "
+        "no accuracy is computed and the extracted claim is verified.",
+    )
+    verified_by: str | None = Field(
+        default=None, description="Who checked the statement against the video, and when."
+    )
     reference_verdict: str | None = None
+
+    @property
+    def exploratory(self) -> bool:
+        return not self.ground_truth_claim
 
     def is_placeholder(self) -> bool:
         return PLACEHOLDER in self.model_dump_json()

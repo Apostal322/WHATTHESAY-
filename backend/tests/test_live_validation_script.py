@@ -133,3 +133,45 @@ async def test_errors_are_recorded_not_raised(settings: Settings) -> None:
         },
         [result],
     )
+
+
+async def test_exploratory_case_verifies_extracted_claim(settings: Settings) -> None:
+    case = CASE.model_copy(update={"ground_truth_claim": None, "verified_by": None})
+    assert case.exploratory
+    llm = FakeLLM(
+        json_responses={
+            "ExtractionOutput": EXTRACTION_OK,
+            "ClaimAnalysisOutput": {**ANALYSIS_FACTUAL, "claim_type": "opinion"},
+        }
+    )
+    args = argparse.Namespace(
+        skip_clipping=True, skip_verify=False, verify_from="ground_truth", fetch_sources=False
+    )
+    async with httpx.AsyncClient() as http:
+        result = await lv.run_case(case, llm, settings, http, args)
+    assert result["extraction"]["claim_f1"] is None
+    assert result["verification"]["claim_verified"] == EXTRACTION_OK["claim"]
+    assert "(exploratory)" in lv.render_report(
+        {
+            "run_at": "t",
+            "extraction_model": "m",
+            "verification_model": "m",
+            "window": "w",
+            "fps": 0.5,
+            "resolution": "low",
+            "prices": {},
+            "preflight": "skipped",
+        },
+        [result],
+    )
+
+
+def test_repo_live_cases_file_is_valid() -> None:
+    path = Path(__file__).resolve().parents[2] / "eval" / "live_cases.jsonl"
+    cases = [
+        LiveCase.model_validate(json.loads(x))
+        for x in path.read_text(encoding="utf-8").splitlines()
+        if x.strip()
+    ]
+    assert {c.language for c in cases} == {"en", "ru"}
+    assert not any(c.is_placeholder() for c in cases)

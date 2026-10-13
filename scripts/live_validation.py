@@ -60,6 +60,13 @@ CLIP_WINDOWS = ((15, 5), (45, 5))  # (before, after) -> 20 s and 50 s
 MAX_PAGE_BYTES = 2_000_000
 
 
+def _f1(predicted: str | None, case: LiveCase) -> float | None:
+    """Token F1 against ground truth; None for exploratory cases (no ground truth)."""
+    if case.exploratory:
+        return None
+    return round(token_f1(predicted or "", case.ground_truth_claim or ""), 3)
+
+
 def _cost(usage: Usage, settings: Settings, searches: int = 0) -> float | None:
     return to_token_usage(usage, settings, searches).estimated_cost_usd
 
@@ -81,8 +88,8 @@ async def run_extraction(case: LiveCase, svc: ExtractionService) -> dict[str, An
         "evidence_from_video": resp.evidence_from_video,
         "is_exact_quote": resp.is_exact_quote,
         "reason": resp.reason,
-        "claim_f1": round(token_f1(resp.claim or "", case.ground_truth_claim), 3),
-        "quote_f1": round(token_f1(resp.evidence_from_video or "", case.ground_truth_claim), 3),
+        "claim_f1": _f1(resp.claim, case),
+        "quote_f1": _f1(resp.evidence_from_video, case),
         "window": resp.window.model_dump(),
         "latency_ms": int((time.perf_counter() - started) * 1000),
         "usage": resp.usage.model_dump(),
@@ -114,7 +121,7 @@ async def run_clipping(case: LiveCase, llm: LLMClient, settings: Settings) -> di
         latency = int((time.perf_counter() - began) * 1000)
         try:
             out = parse_model_json(res.text, ExtractionOutput)
-            claim, f1 = out.claim, round(token_f1(out.claim or "", case.ground_truth_claim), 3)
+            claim, f1 = out.claim, _f1(out.claim, case)
         except AppError as exc:
             claim, f1 = f"<{exc.code}>", 0.0
         runs.append(
@@ -231,9 +238,11 @@ async def run_case(
             out[name] = {"error": exc.code, "message": exc.message}
     if not args.skip_verify:
         extracted = (out.get("extraction") or {}).get("claim")
-        claim = (
-            extracted if args.verify_from == "extracted" and extracted else case.ground_truth_claim
-        )
+        use_extracted = args.verify_from == "extracted" or case.exploratory
+        claim = extracted if use_extracted and extracted else case.ground_truth_claim
+        if not claim:
+            out["verification"] = {"error": "no_claim", "message": "Nothing to verify."}
+            return out
         try:
             out["verification"] = await run_verification(
                 case,
@@ -281,11 +290,11 @@ def render_report(meta: dict[str, Any], results: list[dict[str, Any]]) -> str:
         c, e = r["case"], r.get("extraction", {})
         if "error" in e:
             lines.append(
-                f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'])} | **{e['error']}** | | | | | |"
+                f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'] or '(exploratory)')} | **{e['error']}** | | | | | |"
             )
             continue
         lines.append(
-            f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'])} | "
+            f"| {c['id']} | {c['language']} | {c['timestamp_sec']} | {_short(c['ground_truth_claim'] or '(exploratory)')} | "
             f"{_short(e.get('claim') or e.get('reason'))} | {_fmt(e.get('claim_f1'), 2)} | {e.get('is_exact_quote')} | "
             f"{e.get('latency_ms')} | {e.get('usage', {}).get('prompt_tokens')} | {_fmt(e.get('usage', {}).get('estimated_cost_usd'))} |"
         )
