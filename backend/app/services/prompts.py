@@ -123,7 +123,7 @@ Rules:
   insufficient_evidence: the sources do not settle the claim.
   not_verifiable: the claim is an opinion, prediction, or otherwise not checkable.
 - When in doubt, choose insufficient_evidence. Overstating certainty is worse than admitting uncertainty.
-- Excerpts are summaries produced by a research model and attributed to sources by search grounding; they are not verbatim page text. Mention this in limitations if the verdict hinges on a single excerpt."""
+- Each source states where its excerpts come from: verbatim page text, a search-engine snippet, or a model summary attributed by search grounding. Snippets and summaries are weaker than page text: mention this in limitations if the verdict hinges on one of them."""
 
 
 def evaluation_prompt(

@@ -45,6 +45,7 @@ async def health(request: Request) -> HealthResponse:
         gemini_configured=s.gemini_api_key is not None,
         extraction_model=s.extraction_model,
         verification_model=s.verification_model,
+        retrieval_backend=s.retrieval_backend,
     )
 
 

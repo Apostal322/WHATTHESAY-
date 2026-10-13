@@ -1,6 +1,7 @@
 import json
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from app.core.config import Settings
 from app.core.errors import VideoUnavailableError
@@ -125,3 +126,40 @@ def test_cors_allows_extension_origin_only(client: TestClient) -> None:
         headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
     )
     assert "access-control-allow-origin" not in bad.headers
+
+
+def test_health_reports_retrieval_backend(client: TestClient) -> None:
+    assert client.get("/health").json()["retrieval_backend"] == "gemini_grounding"
+
+
+def test_search_backend_without_providers_fails_clearly(
+    settings: Settings, fake_llm: FakeLLM
+) -> None:
+    fake_llm.json_responses["ClaimAnalysisOutput"] = ANALYSIS_FACTUAL
+    s = settings.model_copy(update={"retrieval_backend": "search"})
+    with TestClient(create_app(s, llm=fake_llm)) as c:
+        r = c.post("/v1/claims/verify", json={"claim": "The Eiffel Tower is in Berlin."})
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "missing_credentials"
+    assert "YOUVERIFY_SEARXNG_URL" in r.json()["error"]["message"]
+    assert not any(name == "grounded_search" for name, _ in fake_llm.calls)  # no silent fallback
+
+
+def test_search_providers_follow_configured_order_and_skip_unconfigured(
+    settings: Settings,
+) -> None:
+    import httpx
+
+    from app.api.deps import build_search_providers
+
+    s = settings.model_copy(
+        update={
+            "search_providers": "brave, searxng",
+            "searxng_url": "http://searxng:8080",
+            "brave_api_key": SecretStr("k"),
+        }
+    )
+    http = httpx.AsyncClient()
+    assert [p.name for p in build_search_providers(s, http)] == ["brave", "searxng"]
+    only_searx = s.model_copy(update={"brave_api_key": None})
+    assert [p.name for p in build_search_providers(only_searx, http)] == ["searxng"]

@@ -51,6 +51,8 @@ export interface VerifyRequest {
   language: Language;
 }
 
+export type ExcerptOrigin = "grounding_summary" | "page_text" | "search_snippet";
+
 export interface SourceRef {
   id: string;
   title: string | null;
@@ -60,6 +62,8 @@ export interface SourceRef {
   published_date: string | null;
   retrieved_at: string;
   excerpts: string[];
+  /** Absent from older backends, which always returned grounding summaries. */
+  excerpt_origin?: ExcerptOrigin;
   stance: Stance | null;
   assessment_note: string | null;
 }

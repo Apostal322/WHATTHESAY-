@@ -55,3 +55,4 @@ ignore_missing_imports = true
 "tests/*" = ["E501"]
 "../scripts/*" = ["E402"]
 "../scripts/live_validation.py" = ["E402", "E501"]  # markdown table templates
+"../scripts/compare_retrieval.py" = ["E402", "E501"]  # markdown table templates

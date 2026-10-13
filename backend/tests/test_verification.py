@@ -4,6 +4,7 @@ from app.core.config import Settings
 from app.core.errors import InvalidModelOutputError, ProviderTimeoutError
 from app.models.schemas import VerifyRequest
 from app.services.citations import EvidenceSource
+from app.services.retrieval import RetrievalResult
 from app.services.verification import (
     VerificationService,
     apply_verdict_guardrails,
@@ -256,3 +257,84 @@ async def test_planned_queries_are_not_reported_as_executed(settings: Settings) 
     resp = await _service(llm, settings).verify(VerifyRequest(claim=CLAIM))
     assert resp.search_queries == []
     assert resp.usage.search_queries == 0
+
+
+class StaticRetriever:
+    """A retriever returning fixed page-text evidence (stands in for SearchRetriever)."""
+
+    name = "search"
+
+    def __init__(self, result: RetrievalResult) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    async def retrieve(self, **kw: object) -> RetrievalResult:
+        self.calls.append(kw)
+        return self.result
+
+
+async def test_search_retriever_evidence_flows_through_with_origin_and_search_cost(
+    settings: Settings,
+) -> None:
+    retriever = StaticRetriever(
+        RetrievalResult(
+            sources=[
+                EvidenceSource(
+                    "S1",
+                    "https://www.bls.gov/ooh/x",
+                    "BLS",
+                    "bls.gov",
+                    ["Employment of software developers is projected to grow 17 percent."],
+                    origin="page_text",
+                )
+            ],
+            executed_queries=["software developer employment"],
+            backend="brave",
+            billed_searches=2,
+            search_cost_usd=0.01,
+        )
+    )
+    llm = FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [{"source_id": "S1", "stance": "contradicts", "note": "n"}],
+                "verdict": "contradicted",
+                "explanation": "Employment is growing [S1].",
+                "key_findings": [],
+                "limitations": [],
+            },
+        }
+    )
+    s = settings.model_copy(
+        update={"price_input_per_million": 1.0, "price_output_per_million": 1.0}
+    )
+    resp = await VerificationService(llm, s, retriever=retriever).verify(
+        VerifyRequest(claim=CLAIM, context="A podcast about jobs.", language="en")
+    )
+    assert not any(name == "grounded_search" for name, _ in llm.calls)
+    assert retriever.calls[0]["claim"] == ANALYSIS_FACTUAL["normalized_claim"]
+    assert resp.verdict == "contradicted"
+    assert resp.sources[0].excerpt_origin == "page_text"
+    assert "verbatim text from the page" in llm.calls[-1][1]["prompt"]
+    assert resp.usage.search_queries == 2
+    tokens_cost = (resp.usage.prompt_tokens + resp.usage.output_tokens) / 1e6
+    assert resp.usage.estimated_cost_usd == round(tokens_cost + 0.01, 6)
+
+
+async def test_search_retriever_with_no_sources_reports_its_reason(settings: Settings) -> None:
+    retriever = StaticRetriever(
+        RetrievalResult(
+            sources=[],
+            executed_queries=[],
+            backend="none",
+            empty_reason="All search providers failed or returned no results.",
+        )
+    )
+    llm = FakeLLM(json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL})
+    resp = await VerificationService(llm, settings, retriever=retriever).verify(
+        VerifyRequest(claim=CLAIM, language="en")
+    )
+    assert resp.verdict == "insufficient_evidence"
+    assert resp.limitations == ["All search providers failed or returned no results."]
+    assert [name for name, _ in llm.calls] == ["ClaimAnalysisOutput"]  # no evaluation call

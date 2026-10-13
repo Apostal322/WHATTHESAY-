@@ -51,6 +51,24 @@ class Settings(BaseSettings):
     max_retries: int = Field(default=2, ge=0, le=5, alias="YOUVERIFY_MAX_RETRIES")
     resolve_source_redirects: bool = Field(default=True, alias="YOUVERIFY_RESOLVE_REDIRECTS")
 
+    # --- Evidence retrieval ---------------------------------------------------
+    # gemini_grounding: Gemini + Google Search grounding (original behaviour).
+    # search: the providers in YOUVERIFY_SEARCH_PROVIDERS, tried in order (failover),
+    # then page fetching and verbatim passage extraction on the backend.
+    retrieval_backend: Literal["gemini_grounding", "search"] = Field(
+        default="gemini_grounding", alias="YOUVERIFY_RETRIEVAL_BACKEND"
+    )
+    search_providers: str = Field(default="searxng,brave", alias="YOUVERIFY_SEARCH_PROVIDERS")
+    searxng_url: str | None = Field(default=None, alias="YOUVERIFY_SEARXNG_URL")
+    brave_api_key: SecretStr | None = Field(default=None, alias="BRAVE_SEARCH_API_KEY")
+    price_per_1k_brave_requests: float | None = Field(
+        default=None, ge=0, alias="YOUVERIFY_PRICE_PER_1K_BRAVE"
+    )
+    search_timeout_sec: float = Field(default=8, gt=0, le=60, alias="YOUVERIFY_SEARCH_TIMEOUT_SEC")
+    search_failure_threshold: int = Field(default=3, ge=1, alias="YOUVERIFY_SEARCH_FAILURES")
+    search_cooldown_sec: float = Field(default=60, ge=0, alias="YOUVERIFY_SEARCH_COOLDOWN_SEC")
+    pages_to_fetch: int = Field(default=6, ge=1, le=12, alias="YOUVERIFY_PAGES_TO_FETCH")
+
     # --- Abuse protection -----------------------------------------------------
     rate_limit_per_minute: int = Field(default=20, ge=1, alias="YOUVERIFY_RATE_LIMIT_PER_MINUTE")
     max_body_bytes: int = Field(default=16_384, ge=1024, alias="YOUVERIFY_MAX_BODY_BYTES")

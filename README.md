@@ -23,7 +23,7 @@ settle the claim, it says so.
 - [Development](#development)
 - [Known limitations](#known-limitations)
 - [Future ML improvements](#future-ml-improvements)
-- Docs: [live validation report](docs/live-validation-report.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
+- Docs: [live validation report](docs/live-validation-report.md) · [evidence retrieval architecture](docs/retrieval-architecture.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
 
 ## How it works
 
@@ -72,12 +72,13 @@ No numerical confidence is shown, because model self-reported confidence is not 
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 115 unit/integration tests with a fake LLM |
+| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 170 unit/integration tests with a fake LLM |
 | Gemini request wire format (YouTube clip, schema, search tool) and response parsing | ✅ Verified against a mocked HTTP transport using the real SDK (google-genai 2.29) and audited against current docs ([report](docs/live-validation-report.md)) |
-| Chrome extension (MV3, side panel, content script, background) | ✅ Implemented; 36 component/unit tests; builds to `extension/dist` |
+| Chrome extension (MV3, side panel, content script, background) | ✅ Implemented; 38 component/unit tests; builds to `extension/dist` |
 | End-to-end UI ↔ backend in a real Chromium | ✅ Automated smoke test (`npm run e2e`). Uses a **fixture YouTube page** and a **scripted fake model** |
 | **Live Gemini extraction and clipping** | ⚠️ **Partly run** (2026-10-13, `gemini-3.8-flash`): extraction succeeded on 4/6 exploratory cases; clip offsets honoured in 3/3 paired 20 s/50 s runs. Claims are unlabelled, so no accuracy yet ([report](docs/live-validation-report.md)) |
 | **Live verification** | ⛔ **0/6 completed**: the key's free-tier quota (20 requests/day/model) ran out. Re-run the failed cases with `scripts/live_validation.py --only …` |
+| Evidence retrieval backends | ✅ `SearchProvider` interface with SearXNG and Brave adapters, failover with a cooldown breaker, ranking, verbatim page passages, citation checks; Gemini grounding remains the default. ⚠️ **No live comparison yet** (search engines blocked in the dev sandbox). Run `scripts/compare_retrieval.py` ([architecture](docs/retrieval-architecture.md)) |
 | **Live youtube.com page in Chrome** | ⚠️ **Not yet run** (YouTube blocked in the dev sandbox). Script: `npm run e2e:live` |
 | Accuracy, latency and cost benchmarks | ⚠️ Extraction only: 21–88 s (median 31 s), about $0.005–0.013 per click at assumed prices. Accuracy and verification cost not measured. Public-release decision: **NO-GO** for now ([report](docs/live-validation-report.md) §7) |
 
@@ -225,7 +226,7 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 
 ```bash
 # backend (from backend/)
-pytest                    # 115 tests, no network, no key
+pytest                    # 170 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 

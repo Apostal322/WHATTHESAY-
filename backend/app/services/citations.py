@@ -18,6 +18,7 @@ import asyncio
 import ipaddress
 import logging
 from dataclasses import dataclass, field
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -31,6 +32,15 @@ _MAX_EXCERPTS_PER_SOURCE = 3
 _MAX_EXCERPT_CHARS = 400
 _MAX_SOURCES = 10
 
+# Where an excerpt's text comes from. Shown to the evaluator, which must weigh
+# a model summary or a search snippet differently from verbatim page text.
+ExcerptOrigin = Literal["grounding_summary", "page_text", "search_snippet"]
+_ORIGIN_LABEL: dict[str, str] = {
+    "grounding_summary": "model summary attributed by search grounding",
+    "page_text": "verbatim text from the page",
+    "search_snippet": "search-engine snippet (page not read)",
+}
+
 
 @dataclass
 class EvidenceSource:
@@ -39,6 +49,7 @@ class EvidenceSource:
     title: str | None
     domain: str | None
     excerpts: list[str] = field(default_factory=list)
+    origin: ExcerptOrigin = "grounding_summary"
 
 
 def is_safe_display_url(url: str) -> bool:
@@ -160,7 +171,10 @@ def format_sources_for_prompt(sources: list[EvidenceSource]) -> str:
 
     blocks = []
     for src in sources:
-        lines = [f"[{src.id}] {src.title or 'Untitled'} ({src.domain or 'unknown domain'})"]
+        lines = [
+            f"[{src.id}] {src.title or 'Untitled'} ({src.domain or 'unknown domain'}); "
+            f"excerpts: {_ORIGIN_LABEL[src.origin]}"
+        ]
         lines += [f"  - <untrusted>{escape_untrusted(ex)}</untrusted>" for ex in src.excerpts]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)

@@ -112,10 +112,15 @@ class SourceRef(BaseModel):
     published_date: str | None = Field(default=None, description="Only set when known.")
     retrieved_at: str
     excerpts: list[str] = Field(
+        description="Evidence passages for this source; see excerpt_origin for what they are."
+    )
+    excerpt_origin: Literal["grounding_summary", "page_text", "search_snippet"] = Field(
+        default="grounding_summary",
         description=(
-            "Passages of the research model's grounded summary that Google Search grounding "
-            "attributes to this source. Summaries, not verbatim quotes from the page."
-        )
+            "grounding_summary: the research model's summary that Google Search grounding "
+            "attributes to this source (not a quote). page_text: verbatim text from the page. "
+            "search_snippet: the search engine's snippet; the page itself was not read."
+        ),
     )
     stance: Stance | None = None
     assessment_note: str | None = None
@@ -168,3 +173,4 @@ class HealthResponse(BaseModel):
     gemini_configured: bool
     extraction_model: str
     verification_model: str
+    retrieval_backend: str = "gemini_grounding"

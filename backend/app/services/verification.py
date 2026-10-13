@@ -24,14 +24,9 @@ from app.models.schemas import (
     VerifyResponse,
 )
 from app.services import prompts
-from app.services.citations import (
-    EvidenceSource,
-    build_sources,
-    dedupe_and_number,
-    format_sources_for_prompt,
-    resolve_redirects,
-)
+from app.services.citations import EvidenceSource, format_sources_for_prompt
 from app.services.llm import LLMClient, Usage
+from app.services.retrieval import GeminiGroundingRetriever, RetrievalResult, Retriever
 from app.services.structured import clip, parse_model_json, to_token_usage
 
 log = logging.getLogger(__name__)
@@ -109,18 +104,23 @@ class VerificationService:
         settings: Settings,
         http_client: httpx.AsyncClient | None = None,
         cache: TTLCache[VerifyResponse] | None = None,
+        retriever: Retriever | None = None,
     ) -> None:
         self._llm = llm
         self._settings = settings
-        self._http = http_client
         self._cache = cache
+        self._retriever = retriever or GeminiGroundingRetriever(
+            llm, settings.verification_model, http_client, settings.resolve_source_redirects
+        )
 
     async def verify(
         self, req: VerifyRequest, progress: ProgressCallback = _noop
     ) -> VerifyResponse:
         s = self._settings
         model = s.verification_model
-        cache_key = f"{' '.join(req.claim.lower().split())}|{req.language}|{model}"
+        cache_key = (
+            f"{' '.join(req.claim.lower().split())}|{req.language}|{model}|{self._retriever.name}"
+        )
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
 
@@ -144,14 +144,18 @@ class VerificationService:
             normalized
         ]
 
+        retrieval: RetrievalResult | None = None
+
         def finish(*, search_queries: list[str], **kw: object) -> VerifyResponse:
+            billed = retrieval.billed_searches if retrieval else 0
+            search_cost = retrieval.search_cost_usd if retrieval else None
             resp = VerifyResponse(
                 claim=req.claim,
                 normalized_claim=normalized,
                 claim_type=analysis.claim_type,
                 model=model,
                 latency_ms=int((time.perf_counter() - started) * 1000),
-                usage=to_token_usage(usage, s, len(search_queries)),
+                usage=to_token_usage(usage, s, billed, search_cost),
                 search_queries=search_queries,
                 **kw,
             )
@@ -161,6 +165,7 @@ class VerificationService:
                     "verdict": resp.verdict,
                     "claim_type": resp.claim_type,
                     "sources": len(resp.sources),
+                    "retrieval": retrieval.backend if retrieval else None,
                     "latency_ms": resp.latency_ms,
                     "total_tokens": usage.total_tokens,
                 },
@@ -185,23 +190,18 @@ class VerificationService:
                 guardrail_notes=[],
             )
 
-        # --- Step C: grounded retrieval --------------------------------------
+        # --- Step C: retrieval (grounding or search providers) ----------------
         await progress("searching")
-        grounded = await self._llm.grounded_search(
-            model=model,
-            system=prompts.RETRIEVAL_SYSTEM,
-            prompt=prompts.retrieval_prompt(
-                claim=normalized, queries=queries, scope_notes=analysis.scope_notes
-            ),
+        retrieval = await self._retriever.retrieve(
+            claim=normalized,
+            queries=queries,
+            scope_notes=analysis.scope_notes,
+            language=req.language,
         )
-        usage += grounded.usage
+        usage += retrieval.usage
         retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
-        candidates = build_sources(grounded)
-        if candidates and self._http is not None and s.resolve_source_redirects:
-            await resolve_redirects(candidates, self._http)
-        sources = dedupe_and_number(candidates)
-        # Only queries Google reports as executed: these are what grounding bills.
-        executed_queries = list(grounded.queries)
+        sources = retrieval.sources
+        executed_queries = retrieval.executed_queries
 
         if not sources:
             return finish(
@@ -212,11 +212,7 @@ class VerificationService:
                 ),
                 key_findings=[],
                 sources=[],
-                limitations=[
-                    "No grounded search results with attributable content were retrieved."
-                    if grounded.raw_metadata_present
-                    else "The search step returned no grounding metadata."
-                ],
+                limitations=[retrieval.empty_reason],
                 search_queries=executed_queries,
                 independent_source_count=0,
                 guardrail_notes=["No verdict was generated without retrieved evidence."],
@@ -279,6 +275,7 @@ class VerificationService:
                 domain=src.domain,
                 retrieved_at=retrieved_at,
                 excerpts=src.excerpts,
+                excerpt_origin=src.origin,
                 stance=stances.get(src.id),
                 assessment_note=assessment_notes.get(src.id),
             )
