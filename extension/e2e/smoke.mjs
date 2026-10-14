@@ -7,7 +7,7 @@
 //
 // YouTube is replaced by a local fixture page (request interception), so the
 // content script, background messaging and side panel all run for real, but no
-// real video is involved. Live YouTube + Gemini must be tested by hand (README).
+// real video is involved. Live YouTube + Gemini must be tested by hand (docs/development.md).
 //
 // Usage: CHROMIUM_PATH=/path/to/chrome node e2e/smoke.mjs [--screenshots <dir>]
 import { mkdtempSync } from "node:fs";

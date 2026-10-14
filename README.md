@@ -1,358 +1,405 @@
+<div align="center">
+
 # YouVerify AI
 
-Fact-check a statement from the YouTube video you are watching without leaving the
-video. Press **Verify claim** in Chrome's side panel. YouVerify finds the statement
-near the current timestamp, lets you confirm or edit it, searches for evidence, and
-returns an evidence-based verdict with clickable sources. When the evidence does not
-settle the claim, it says so.
+**Fact-check what someone says in a YouTube video at the moment they say it, with sources you can open and an honest "not enough evidence" when that is the answer.**
 
-<p>
-  <img src="docs/images/claim-confirmation.png" width="300" alt="Claim confirmation step">
-  <img src="docs/images/verdict.png" width="300" alt="Verdict with sources">
-</p>
+[![CI](https://github.com/Apostal322/WHATTHESAY-/actions/workflows/ci.yml/badge.svg)](https://github.com/Apostal322/WHATTHESAY-/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-React%2019-3178C6?logo=typescript&logoColor=white)
+![Chrome MV3](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
+![Gemini](https://img.shields.io/badge/LLM-Google%20Gemini-8E75B2?logo=googlegemini&logoColor=white)
+![Status](https://img.shields.io/badge/status-research%20prototype-orange)
 
-<sub>Screenshots are from the automated E2E run, which uses canned fixture data, not a real verdict.</sub>
+</div>
+
+YouVerify AI is a Chrome side-panel extension with a Python backend. While a video plays, you
+click **Verify claim**. The app:
+
+1. finds the statement spoken just before that moment;
+2. lets you confirm or correct it;
+3. retrieves evidence;
+4. returns a verdict with numbered, clickable sources.
+
+Every verdict the model proposes passes through deterministic safeguards. A safeguard can
+overrule the model when the retrieved evidence does not justify its confidence.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/demo-1-confirm.png" width="250" alt="Claim extracted from the video, shown for confirmation"></td>
+    <td align="center"><img src="docs/images/demo-2-safeguard.png" width="250" alt="Attribution safeguard overriding a model verdict"></td>
+    <td align="center"><img src="docs/images/demo-3-supported.png" width="250" alt="Supported verdict with two independent sources"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>1. Confirm the claim</b><br><sub>extracted near 12:35, editable</sub></td>
+    <td align="center"><b>2. A safeguard at work</b><br><sub>the model said "Supported" from an outlet's summary; the backend refused it</sub></td>
+    <td align="center"><b>3. A backed verdict</b><br><sub>two independent sources</sub></td>
+  </tr>
+</table>
+
+> [!NOTE]
+> **These screenshots use synthetic demo data.** They show the real built extension and the real
+> backend (API, streaming, guardrails), but the model's answers come from a scripted fake model
+> ([`backend/tests/demo_server.py`](backend/tests/demo_server.py)). The town, the mayor and the
+> `example.*` sources are invented, and every model-written line is tagged `[DEMO]`. In image 2,
+> the safeguard is the real attribution check reacting to the scripted model verdict.
+> [How to regenerate them](docs/development.md#regenerating-the-readme-screenshots).
+
+---
 
 ## Contents
 
-- [How it works](#how-it-works)
-- [Project status](#project-status)
-- [Setup (Windows)](#setup-windows) · [macOS / Linux](#setup-macos--linux)
-- [Testing the full user flow](#testing-the-full-user-flow)
-- [API](#api)
-- [Development](#development)
-- [Diagnosing provider errors](#diagnosing-provider-errors)
-- [Known limitations](#known-limitations)
-- [Future ML improvements](#future-ml-improvements)
-- Docs: [Windows local validation](docs/windows-local-validation.md) · [live validation report](docs/live-validation-report.md) · [evidence retrieval architecture](docs/retrieval-architecture.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
+[Problem](#the-problem) · [Solution](#the-solution) · [Features](#key-features) ·
+[Architecture](#architecture) · [ML / RAG pipeline](#the-ml--rag-pipeline) · [Tech stack](#technology-stack) ·
+[Status](#project-status-what-is-real) · [Installation](#installation) · [Usage](#usage) ·
+[Testing](#testing-and-quality) · [Evaluation](#evaluation-methodology) · [Security](#security-and-privacy) ·
+[Limitations](#known-limitations) · [Roadmap](#roadmap) · [Docs](#documentation)
 
-## How it works
+## The problem
 
+Claims made in videos are hard to check. You have to pause, transcribe the sentence, search, open
+several pages and judge whether they really say what you hoped. LLM-based fact-checkers make
+this faster, but they bring their own failure modes:
+
+- **Invented or unrelated sources.** The model cites a URL it never retrieved, or one that does
+  not say what it claims.
+- **Overconfidence.** The model gives a confident verdict when the evidence is thin, one-sided,
+  or several copies of the same wire story.
+- **Misattribution.** A journalist's *summary* of what someone meant is treated as the person's
+  *own words*.
+- **Hidden uncertainty.** The model reports a number like "87% confident" that is not calibrated.
+
+## The solution
+
+YouVerify treats the language model as a capable but untrusted component and puts checkable rules
+around it:
+
+- **Only retrieved sources can be cited.** Sources are built from grounding metadata or search
+  results, never from model text. Unknown source IDs and citations are dropped.
+- **Verdicts need backing.** `supported` / `contradicted` / `mixed` require sources that the
+  evaluation actually assessed in that direction. Otherwise the verdict becomes
+  `insufficient_evidence`.
+- **What someone said is a separate kind of claim.** "X said Y" needs X's own words (a quotation
+  or a transcript line), and any quoted wording must appear verbatim in a source.
+- **Safeguards are recorded, not hidden.** When the backend overrules the model, the response
+  carries a `verdict_adjustments` entry (rule, from, to, reason). The UI shows it apart from
+  advisory warnings.
+- **No fake confidence.** There are five verdict labels and no confidence score.
+
+## Key features
+
+| | |
+|---|---|
+| 🎯 **Timestamp-based claim extraction** | Gemini watches only a clip around the click (default 45 s before, 10 s after; low frame rate), not the whole video. |
+| ✍️ **Human in the loop** | The extracted claim is always shown for editing, labelled *exact quote* or *paraphrase*, before anything is verified. |
+| 🔎 **Two retrieval modes** | **Google Search grounding** (default; needs only a Gemini key), or **search + page fetch** (Brave or a private SearXNG). In search mode, verbatim passages are taken from fetched pages. |
+| ⚖️ **Per-source evaluation** | Each numbered source is assessed (`supports` / `contradicts` / `partially_supports` / `unclear` / `irrelevant`) before a verdict is proposed. |
+| 🛡️ **Deterministic safeguards** | Backing-source check, attribution and exact-quote checks, quotation guard, independence count that treats syndicated copies as one origin, and citation integrity. |
+| 📡 **Streaming progress** | NDJSON stream of the backend's real stages: analysing, searching, evaluating. |
+| 🌍 **English and Russian** | Extraction, analysis and reported-speech detection for both languages. |
+| 🧪 **Evaluation tooling** | Reference records, offline evidence fixtures, proposition-level scoring, chronology checks, and a "false confident verdict" metric. |
+| 🔐 **Security-first** | Keys stay on the backend; SSRF-guarded fetching with DNS pinning; prompt-injection delimiters; minimal extension permissions; secret scanner in CI. |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Chrome["Chrome extension (MV3, React + TypeScript)"]
+        CS["Content script<br/>video id + playback time<br/>(read-only)"]
+        BG["Background<br/>service worker"]
+        SP["Side panel UI<br/>state machine:<br/>extract → confirm → verify"]
+        CS -- "video context" --> BG --> SP
+    end
+
+    subgraph Backend["Backend (FastAPI, localhost)"]
+        API["REST + NDJSON stream<br/>validation · rate limit · CORS"]
+        EX["Claim extraction"]
+        VP["Verification pipeline"]
+        GR["Deterministic<br/>safeguards"]
+        API --> EX
+        API --> VP --> GR
+    end
+
+    subgraph External["External services"]
+        GM["Google Gemini<br/>(video understanding,<br/>JSON generation)"]
+        GS["Google Search<br/>grounding"]
+        SE["Brave / SearXNG<br/>+ publisher pages"]
+    end
+
+    SP -- "POST /v1/claims/extract" --> API
+    SP -- "POST /v1/claims/verify/stream" --> API
+    EX -- "clipped YouTube URL" --> GM
+    VP -- "analysis, evaluation" --> GM
+    VP -- "default retrieval" --> GS
+    VP -. "optional retrieval" .-> SE
 ```
- Chrome                                              Backend (FastAPI, localhost)              Google
-┌─────────────────────────────────────┐            ┌──────────────────────────────────────┐
-│ content script (youtube.com/watch)  │            │ POST /v1/claims/extract               │
-│  reads video id + currentTime       │            │  validate id → canonical URL          │   Gemini
-│            ▲ GET_VIDEO_CONTEXT      │            │  clip [t-45s, t+10s], fps 0.5, low res ├──► video understanding
-│ background service worker           │            │  → structured ExtractionOutput        │
-│            ▲ GET_ACTIVE_VIDEO_CTX   │   HTTP     │                                      │
-│ React side panel ───────────────────┼───────────►│ POST /v1/claims/verify/stream (NDJSON)│
-│  idle → extracting → claim_ready    │            │  A  analyze: type + search queries    ├──► Gemini (JSON)
-│  (user edits) → searching →         │◄───────────┤  C  grounded search                   ├──► Gemini + Google Search
-│  evaluating → complete | error      │  stages +  │     sources ONLY from grounding meta  │
-└─────────────────────────────────────┘  result    │  D  evaluate evidence (no tools)      ├──► Gemini (JSON)
-                                                   │  F  guardrails: drop unknown ids,     │
-                                                   │     downgrade unsupported verdicts    │
-                                                   └──────────────────────────────────────┘
+
+**Design boundaries**
+
+- **Adapter boundary:** business logic depends on an `LLMClient` protocol. `GeminiClient` is the
+  only module that imports the Gemini SDK, so tests use deterministic fakes.
+- **Retriever protocol:** `GeminiGroundingRetriever`, `SearchRetriever` and the offline
+  `FixtureRetriever` all return the same `EvidenceSource` records. Each record is labelled with
+  its origin: `grounding_summary`, `search_snippet` or `page_text`.
+- **Model output is untrusted:** it is schema-constrained at generation, re-validated with
+  Pydantic, length-clipped and post-checked.
+- **No database:** an in-memory TTL cache behind a `get`/`set` interface, which Redis can
+  replace without touching the services.
+
+## The ML / RAG pipeline
+
+```mermaid
+flowchart TD
+    A["A · Claim extraction<br/>Gemini watches clip t−45s … t+10s<br/>→ claim, type, quote-or-paraphrase"] --> B
+    B["B · User confirmation<br/>edit or accept the claim"] --> C
+    C["A′ · Analysis<br/>re-classify · plan 2–4 search queries<br/>flag speaker and quoted words"] --> D{"checkable?"}
+    D -- "opinion / prediction" --> NV["not_verifiable<br/>(no search)"]
+    D -- "factual" --> R
+    R["C · Retrieval<br/>grounding metadata or search + page fetch<br/>dedupe · rank fusion · ≤2 per site"] --> E0{"any sources?"}
+    E0 -- "no" --> IE["insufficient_evidence<br/>(no verdict call)"]
+    E0 -- "yes" --> E
+    E["D · Evaluation (no tools)<br/>stance per numbered source<br/>→ proposed verdict + cited explanation"] --> G
+    G["E · Deterministic safeguards"] --> OUT["Verdict · sources · findings<br/>warnings · verdict adjustments"]
 ```
 
-**Pipeline**
-
-| Step | What happens | Where |
+| Stage | What happens | Code |
 |---|---|---|
-| A. Claim extraction | Gemini watches only a clip around the click. It returns the claim, its type (`factual` / `prediction` / `opinion` / `ambiguous` / `non_verifiable`), context, and what was said, flagged as exact quote or paraphrase. | `services/extraction.py` |
-| B. Confirmation | The claim is always shown for editing before verification, because timestamp alignment is not guaranteed. | `ClaimEditor.tsx` |
-| A′. Analysis | Re-classifies the (possibly edited) claim and plans 2–4 search queries. Opinions and predictions stop here with `not_verifiable`. | `services/verification.py` |
-| C. Retrieval | Gemini with **Google Search grounding**. Citable sources are built **only** from `grounding_chunks`, with excerpts from `grounding_supports`. The model cannot add a URL. | `services/citations.py` |
-| D–E. Evaluation | A separate tool-less call assesses each numbered source (`supports` / `contradicts` / `partially_supports` / `irrelevant`) and proposes a verdict using only those sources. | `prompts.py` |
-| F. Integrity | Deterministic Python: drops assessments and citations with unknown IDs, downgrades a verdict to `insufficient_evidence` if no source was assessed as backing it, flags single-domain verdicts, merges duplicate URLs, counts independent domains. No sources means `insufficient_evidence` without any verdict call. | `verification.py`, `citations.py` |
+| **A. Extraction** | Gemini receives the public YouTube URL with clip offsets and a low frame rate and media resolution. It returns a structured `ExtractionOutput`: the claim, its type (`factual` / `prediction` / `opinion` / `ambiguous` / `non_verifiable`), context, and what was said, flagged as exact quote or paraphrase. | `services/extraction.py` |
+| **B. Confirmation** | Timestamp alignment is best-effort, so a person always confirms or edits the claim. | `components/ClaimEditor.tsx` |
+| **A′. Analysis** | Re-classifies the (possibly edited) claim and plans search queries. It also records whom the claim attributes words to and any exact words quoted. Opinions and predictions stop here. | `services/verification.py`, `prompts.py` |
+| **C. Retrieval** | *Grounding mode:* sources come **only** from Gemini's `grounding_chunks`, with excerpts from `grounding_supports`; the model cannot add a URL. *Search mode:* Brave/SearXNG with failover and a circuit breaker; canonical-URL dedupe, rank fusion across queries, a lexical relevance filter, and at most two results per site. Pages are fetched SSRF-safely and verbatim passages of up to 400 characters are extracted and re-checked against the page. | `services/retrieval.py`, `search.py`, `evidence.py`, `fetch.py`, `citations.py` |
+| **D. Evaluation** | A separate tool-less Gemini call sees only the numbered sources and where each excerpt came from. It assesses each source, then proposes a verdict with `[S#]` citations. | `prompts.py`, `verification.py` |
+| **E. Safeguards** | Deterministic Python. It can **change** the verdict (recorded in `verdict_adjustments`) or **warn** (recorded in `guardrail_notes`). See the table below. | `verification.py`, `attribution.py`, `evidence.py` |
 
-Verdicts: `supported`, `contradicted`, `mixed`, `insufficient_evidence`, `not_verifiable`.
-No numerical confidence is shown, because model self-reported confidence is not calibrated.
+**Safeguards (they change the verdict)**
 
-**Design choices**
-- **Adapter boundary.** Business logic depends on an `LLMClient` protocol. `GeminiClient`
-  is the only module that imports the SDK, and tests use a deterministic fake.
-- **Model output is untrusted.** It is schema-constrained at generation time, re-validated
-  with Pydantic, length-clipped and post-checked.
-- **Streaming progress.** The UI shows the backend's actual stages, not a timer.
-- **No database.** A small in-memory TTL cache with a `get`/`set` interface sits behind
-  the services, so Redis can replace it without touching them.
+| Rule | Trigger | Result |
+|---|---|---|
+| `verdict_without_backing_source` | `supported` / `contradicted` / `mixed` with no source assessed in that direction | `insufficient_evidence` |
+| `attribution_without_direct_evidence` | A claim about what someone said ("X said…", "X заявил…", or flagged by the analysis) without the speaker's own words in a backing source. Own words means a quotation in an excerpt that names them, or a transcript line under their label, found in page text or in two independent sources. A moderator restating the claim, or a quotation from someone else, does not count. | `insufficient_evidence` |
+| `exact_quote_not_confirmed` | `supported` for a claim that quotes words, when those words are not verbatim in a supporting source | `insufficient_evidence` |
 
-## Project status
+**Warnings (advisory notes, verdict unchanged):** verdict resting on a single origin; quoted
+words in the explanation not found in the cited page text; dropped unknown citations;
+syndicated near-copies counted once.
 
-Status words: **verified live** (ran against the real provider), **verified with mocks** (automated
-tests with fake providers or fixture pages), **implemented, not tested live**, **blocked** (reason
-given). Last updated 2026-10-14.
+Verdict labels: `supported`, `contradicted`, `mixed`, `insufficient_evidence`, `not_verifiable`.
+
+## Technology stack
+
+| Layer | Technology |
+|---|---|
+| LLM | Google Gemini via `google-genai` (video understanding, JSON-schema output, Google Search grounding); optional fallback model on HTTP 503 |
+| Backend | Python 3.11+, FastAPI, Uvicorn, Pydantic v2, pydantic-settings, httpx |
+| Retrieval | Gemini grounding; Brave Search API; SearXNG (private instance); SSRF-guarded page fetcher with DNS pinning |
+| Extension | Chrome Manifest V3 (side panel, service worker, content script), React 19, TypeScript, Vite |
+| Testing | pytest + pytest-asyncio, Vitest + Testing Library + jsdom, Playwright-driven Chromium E2E |
+| Quality | Ruff (lint + format), mypy (strict), `tsc --noEmit`, secret scanner, GitHub Actions CI |
+
+## Project status: what is real
+
+This is a **research prototype**, not a product. Status words: *verified live* (run against the
+real provider), *verified with mocks* (automated tests with fake models or fixture pages),
+*blocked* (reason given).
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | Verified with mocks: 297 backend tests (ruff, format, mypy clean) |
-| Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 41 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
-| Video claim extraction (Gemini, clipped YouTube window) | **Verified live**: 4/6 cases on `gemini-3.8-flash` (2026-10-13) and 1 case on `gemini-3.6-flash` (2026-10-14, 9.7 s). Extractions are **unlabelled**: no accuracy is claimed, and the model's "exact quote" flag and speaker are unverified |
-| Clip offsets reduce processed video | **Verified live** on `gemini-3.8-flash`: media tokens scaled 2.50× for a 2.50× window in 3/3 paired runs |
-| Claim analysis (type, queries) | **Verified live** once (`gemini-3.6-flash`, 2026-10-14); output not retained (fixed since: see report §7c) |
-| Grounded verification (verdict with sources) | **Blocked**: no completed live verdict yet. Gemini models returned 503 (overload) intermittently; Google Search grounding returned 429 quota on this free-tier key. See [report](docs/live-validation-report.md) §7c |
-| Brave / SearXNG search, page quoting, citation checks, independence | Verified with mocks. **Blocked live**: no Brave key, and the dev sandbox denies search and publisher sites. See [architecture](docs/retrieval-architecture.md) |
-| Model fallback on 503; per-step model recording | Verified with mocks; fallback **verified live** once (3.8 → 3.6 served the extraction) |
-| Real youtube.com page in Chrome | **Blocked**: YouTube is denied in the dev sandbox. Script: `npm run e2e:live` |
-| Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)). One AI-reviewed reference record exists (`eval/reference/en-debate-1200`, five propositions); scores against it are provisional and never reported as accuracy |
-| Offline evidence fixture + proposition-level runs | Implemented and verified with mocks (synthetic pages): capture, offline retriever, quotation check, chronology, per-proposition scoring. The real fixture (`eval/fixtures/en-debate-1200`) has **no captured excerpts yet**: every source host is blocked from the dev sandbox. Capture runs locally: [Windows guide](docs/windows-local-validation.md) §5 |
-| Quoted words vs. sources | Verified with mocks: quotations in the explanation and findings that are not verbatim in cited page text are flagged in `guardrail_notes` (a warning) |
-| Claims about what someone said | Verified with mocks: a confident verdict needs the speaker's own words (quotation or transcript line) and any quoted wording verbatim, in page text or two independent sources; otherwise it becomes `insufficient_evidence`, recorded in `verdict_adjustments` (a safeguard). Heuristic, not semantic: [report](docs/live-validation-report.md) §7g |
-| Public deployment | Not ready: see the public-beta blockers in [security & privacy](docs/security-privacy.md) and report §7 (NO-GO) |
+| Backend API, pipeline, safeguards, error handling | ✅ Verified with mocks: **297** backend tests; Ruff, mypy (strict) clean; CI green |
+| Chrome extension UI and messaging | ✅ Verified with mocks: **41** component and unit tests; headless-Chromium E2E smoke test against the real built extension |
+| Video claim extraction with Gemini | ✅ **Verified live**: 5 successful extractions across two Gemini models. Outputs are **not yet labelled**, so no accuracy is claimed |
+| Clip offsets reduce processed video | ✅ **Verified live**: media tokens scaled with the window length in 3/3 paired runs |
+| End-to-end live verdict with real sources | ⛔ **Blocked**: free-tier Gemini returned 503 overload and a Google Search grounding 429 quota during live attempts. No live verdict has been produced yet |
+| Search mode (Brave / SearXNG + page fetch) | 🧪 Verified with mocks; not run live (no Brave key, and the dev sandbox blocks publisher sites) |
+| Accuracy | ⚠️ **Not measured.** It needs human-labelled cases; see [Evaluation](#evaluation-methodology) |
+| Public deployment | ❌ Not ready: single-user local backend, no auth. See the blockers in [security & privacy](docs/security-privacy.md) |
 
-## Setup (Windows)
+Full detail, including every live attempt and its failure: [live validation report](docs/live-validation-report.md).
 
-Full step-by-step guide, including a network reachability check, safe key handling and the
-offline evidence fixture: [docs/windows-local-validation.md](docs/windows-local-validation.md).
+## Installation
 
-**Requirements:** Windows 10/11, [Python 3.11+](https://www.python.org/downloads/),
-[Node.js 22.12+](https://nodejs.org/) (LTS), Google Chrome 116+, and a
-[Gemini API key](https://aistudio.google.com/apikey).
+**Requirements:** Python 3.11+, Node.js 22.12+, Google Chrome 116+, and a
+[Gemini API key](https://aistudio.google.com/apikey). The key is only needed for live runs: the
+tests and the demo backend need none.
 
-PowerShell, from the repository root:
+### 1. Configure
 
-```powershell
-# 1. Configuration
-Copy-Item .env.example .env
-notepad .env                      # set GEMINI_API_KEY=...
+```bash
+cp .env.example .env        # Windows: Copy-Item .env.example .env
+```
 
-# 2. Backend
+Set `GEMINI_API_KEY` in `.env`. Never commit it: `.env` is git-ignored, and
+`python scripts/scan_secrets.py --staged` checks a commit before you make it. On Windows, the
+[local validation guide](docs/windows-local-validation.md) shows masked key entry that keeps the
+key out of the PowerShell history.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `YOUVERIFY_EXTRACTION_MODEL` / `YOUVERIFY_VERIFICATION_MODEL` | `gemini-3.8-flash` | Check what your key can use with `python scripts/list_models.py` |
+| `YOUVERIFY_FALLBACK_MODEL` | `gemini-3.6-flash` | Tried once, only on 503 overload |
+| `YOUVERIFY_RETRIEVAL_BACKEND` | `gemini_grounding` | Or `search` (Brave / SearXNG + page fetch) |
+| `YOUVERIFY_GEMINI_DAILY_CALL_LIMIT` | unset | Hard daily cap on model requests per process |
+| `YOUVERIFY_ALLOWED_ORIGIN_REGEX` | any extension | Restrict CORS to your extension ID |
+
+All settings are documented in [`.env.example`](.env.example).
+
+### 2. Backend
+
+```bash
 cd backend
-py -3.11 -m venv .venv            # or: python -m venv .venv
-.\.venv\Scripts\Activate.ps1      # if blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+python -m venv .venv
+source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-python ..\scripts\list_models.py  # check which models your key can use; set YOUVERIFY_*_MODEL in .env if needed
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Check it at <http://127.0.0.1:8000/health>. `"gemini_configured": true` means the key was loaded.
+Open <http://127.0.0.1:8000/health>. `"gemini_configured": true` means the key was loaded.
+Interactive API docs are at `/docs`.
 
-In a **second** PowerShell window:
+### 3. Extension
 
-```powershell
-# 3. Extension
+```bash
 cd extension
 npm ci
-npm run build                     # produces extension\dist
+npm run build                      # → extension/dist
 ```
 
-**4. Load in Chrome**
-1. Open `chrome://extensions` and turn on **Developer mode** (top right).
-2. Click **Load unpacked** and select the `extension\dist` folder.
-3. Pin **YouVerify AI** from the puzzle-piece menu. Clicking its icon opens the side panel.
-4. Recommended: copy the extension ID shown on the card and restrict the backend to it
-   in `.env`, then restart the backend:
-   `YOUVERIFY_ALLOWED_ORIGIN_REGEX=^chrome-extension://<your-id>$`
+In Chrome, open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and
+select `extension/dist`. Pin **YouVerify AI**; clicking it opens the side panel. Then set
+`YOUVERIFY_ALLOWED_ORIGIN_REGEX=^chrome-extension://<your-extension-id>$` in `.env` and restart
+the backend.
 
-After rebuilding, click the reload icon on the extension card. Reload any YouTube tabs
-that were open before the extension was installed.
+## Usage
 
-## Setup (macOS / Linux)
+1. Open a public `youtube.com/watch` video with speech (English or Russian) and open the side panel.
+2. Just after a factual statement, click **Verify claim at mm:ss**. The video keeps playing.
+3. Check the proposed claim and its *quote* / *paraphrase* label, edit it if needed, then click
+   **Check this claim** (Ctrl+Enter).
+4. Read the verdict, any **safeguard** notice, the limitations, and the sources. Open the sources:
+   excerpts in grounding mode are AI summaries attributed to a page, not quotations.
+
+You can also **type a claim manually**, with no video. To check one claim from the command line:
 
 ```bash
-cp .env.example .env && $EDITOR .env
-cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-# new terminal
-cd extension && npm ci && npm run build   # then load extension/dist as above
-```
-
-## Testing the full user flow
-
-0. **Run the live validation harness** (preflight, extraction against your
-   human-verified moments, 20 s vs 50 s clipping, verification, cited-page screening):
-   ```bash
-   cp eval/live_cases.template.jsonl eval/live_cases.jsonl   # fill in real moments
-   python scripts/live_validation.py eval/live_cases.jsonl --fetch-sources
-   ```
-   See [docs/live-validation-report.md](docs/live-validation-report.md).
-1. **Or validate extraction on its own** (the riskiest part):
-   ```bash
-   python scripts/poc_extract_claim.py --url "https://www.youtube.com/watch?v=VIDEO_ID" --timestamp 755
-   python scripts/poc_extract_claim.py --url "https://www.youtube.com/watch?v=VIDEO_ID" --timestamp 755 --probe-clipping
-   ```
-   The first command prints the extracted claim JSON with latency and token usage.
-   The second checks whether Gemini honours clip offsets (see [feasibility](docs/feasibility.md)).
-2. Open a public `youtube.com/watch` video with speech (English or Russian) and open the side panel.
-   It shows the video title and current position.
-3. Just after a factual statement, click **Verify claim at mm:ss**. The video keeps playing.
-4. Check the proposed claim and its quote/paraphrase label. Edit it if the wrong sentence
-   was picked, then click **Check this claim** (or press Ctrl+Enter).
-5. Watch the stages (analyzing, searching, evaluating), then read the verdict, the
-   limitations and the sources. Open a source to confirm it says what the excerpt claims.
-6. Edge cases to try:
-   - a Shorts page (blocked with a message)
-   - an ad playing
-   - a private or region-locked video (offers manual entry)
-   - an opinion such as "this is the best phone ever" (should return `not_verifiable`)
-   - **Or type a claim manually** on any page
-   - backend stopped or started without a key (clear status and errors)
-
-Without a key you can still exercise the UI end to end with the scripted fixture backend:
-
-```bash
-cd backend && python -m tests.e2e_server      # fake model, canned data; clearly labelled
-cd extension && npm run build && npm run e2e  # headless Chromium smoke test
-```
-`npm run e2e` launches Chromium from `CHROMIUM_PATH`. On Windows, point it at Chrome:
-`$env:CHROMIUM_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"`.
-
-## API
-
-Interactive docs: <http://127.0.0.1:8000/docs>. All errors look like
-`{"error": {"code": "...", "message": "...", "retryable": bool}}`. The codes are
-`invalid_input`, `video_unavailable`, `missing_credentials`, `model_not_found`,
-`rate_limited`, `provider_rate_limited`, `provider_quota_exhausted`, `provider_timeout`, `provider_error`,
-`retrieval_unavailable` (no evidence could be retrieved at all; not a verdict), `backend_misconfigured`,
-`invalid_model_output` and `payload_too_large`.
-
-```http
-POST /v1/claims/extract
-{"youtube_url": "https://www.youtube.com/watch?v=VIDEO_ID", "timestamp_sec": 755, "language": "auto"}
-```
-```json
-{
-  "status": "success",
-  "video_id": "VIDEO_ID",
-  "timestamp_sec": 755,
-  "window": {"start_sec": 710, "end_sec": 765},
-  "claim": "Artificial intelligence has already replaced 80% of software engineers.",
-  "claim_type": "factual",
-  "context": "…",
-  "evidence_from_video": "AI has already replaced like 80 percent of software engineers",
-  "is_exact_quote": false,
-  "requires_user_confirmation": true,
-  "language": "en",
-  "reason": null,
-  "model": "gemini-…",
-  "latency_ms": 0,
-  "cached": false,
-  "usage": {"prompt_tokens": 0, "output_tokens": 0, "total_tokens": 0, "video_tokens": null, "audio_tokens": null, "estimated_cost_usd": null}
-}
-```
-`status` is `no_claim_found` (with a `reason`) when nothing checkable was said.
-The values above show the response shape, not a measured result.
-
-```http
-POST /v1/claims/verify          → VerifyResponse (JSON)
-POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|searching|evaluating"} … {"event":"result","data":VerifyResponse}
-{"claim": "…", "context": "…", "claim_type_hint": "factual", "video_id": "…", "timestamp_sec": 755, "language": "auto"}
-```
-`VerifyResponse` contains `claim`, `normalized_claim`, `claim_type`, `verdict`,
-`explanation` (with `[S#]` citations), `key_findings`, `sources[]` (`id`, `title`, `url`,
-`domain`, `retrieved_at`, `excerpts`, `stance`, `assessment_note`; `publisher` and
-`published_date` are `null` unless known, never guessed), `limitations`,
-`search_queries`, `independent_source_count`, `guardrail_notes` (advisory warnings),
-`verdict_adjustments` (safeguards that changed the model's verdict: `rule`, `from_verdict`,
-`to_verdict`, `reason`) and `usage`.
-
-## Development
-
-```bash
-# backend (from backend/)
-pytest                    # 297 tests, no network, no key
-ruff check . ../scripts && ruff format --check . ../scripts
-mypy app                  # strict
-python ../scripts/scan_secrets.py            # tracked files (CI); add --staged before a commit
-
-# extension (from extension/)
-npm test                  # vitest + Testing Library (41 tests)
-npm run typecheck
-npm run build
-npm run e2e               # needs the build + a backend on :8000 (see above)
-```
-
-Repository layout:
-
-```
-backend/app/
-  api/          routes (incl. NDJSON stream), dependency wiring
-  core/         config, typed errors, JSON logging, TTL cache, rate limiter
-  models/       API schemas, model-output schemas
-  services/     youtube validation, Gemini adapter, prompts, extraction,
-                verification + guardrails, citation integrity
-  evaluation/   eval dataset schema and metrics; reference records, offline evidence
-                fixtures, chronology, proposition-level runs
-backend/tests/  unit, API and adapter tests; e2e_server.py fixture
-extension/src/
-  content/      YouTube video context (read-only)
-  background/   side panel behavior, message broker
-  sidepanel/    App, hooks, Chrome bridge, styles
-  components/   ClaimEditor, VerdictCard, SourceList, …
-  shared/       API client, state machine, types, formatting
-scripts/        poc_extract_claim.py, live_validation.py, verify_claim.py, capture_evidence.py,
-                run_fixture_case.py, list_models.py, run_eval.py, make_icons.py
-eval/           dataset.example.jsonl, reference/ (answer keys), fixtures/ (offline evidence),
-                factchecks/ (run artifacts); runs/ is git-ignored
-docs/           feasibility, evaluation, security & privacy
-```
-
-## Diagnosing provider errors
-
-Every provider failure is returned with a stable code. The backend logs (JSON) and the evaluation
-artifacts also carry sanitized diagnostics: operation, model, HTTP status, provider status, quota id,
-retry delay and the steps that completed before the failure. Diagnostics are never sent to the
-extension.
-
-| Code | Meaning | What to do |
-|---|---|---|
-| `provider_error` with HTTP 503 in the logs | The Gemini model is overloaded ("high demand") | Wait, or set `YOUVERIFY_FALLBACK_MODEL` (one fallback attempt per call, 503 only) |
-| `provider_quota_exhausted` | The key's quota is used up: daily request cap, or a search-grounding quota | Do not retry in a loop. Wait for the reset (Google documents midnight Pacific for daily quotas) or use a key with more quota |
-| `provider_rate_limited` | A short-window rate limit | Retry after a short wait |
-| `retrieval_unavailable` | No evidence could be retrieved at all (search or page fetch outage). **Not a verdict** | Retry later; check search provider configuration and network |
-| `backend_misconfigured` | e.g. paid search without a price or daily cap | Fix the `.env` settings named in the message |
-| `missing_credentials` | `GEMINI_API_KEY` (or a search key) is not set | Configure it on the backend |
-
-**Checking one claim without the extension (manual-claim mode):**
-
-```bash
-# typed claim (labelled "manual" in the artifact)
 python scripts/verify_claim.py --claim "The Eiffel Tower was completed in 1889." --id eiffel
-# or reuse a saved video extraction, with no new extraction call
-python scripts/verify_claim.py --from-run eval/factchecks/<artifact>.json
 ```
 
-This writes `eval/factchecks/<id>-<time>.json` plus a Markdown review sheet.
-
-**A reference case, proposition by proposition, over offline evidence** (no search; 2 calls per
-proposition; refuses to run until the fixture has captured excerpts):
+**Try the UI without a key.** Run the scripted demo backend, then load the extension as above:
 
 ```bash
-python scripts/capture_evidence.py --check-only     # which hosts this network reaches (no API calls)
-python scripts/capture_evidence.py                  # the app captures short verbatim excerpts
-python scripts/run_fixture_case.py                  # dry run: plan and call count
-python scripts/run_fixture_case.py --llm gemini --max-calls 10
+cd backend && python -m tests.demo_server     # synthetic [DEMO] data, fake model
 ```
 
-The result is "live evaluation of offline evidence", never a live fact-check. A person fills in the
-review section (quote and speaker checked, sources opened, verdict agrees). In the extension, use
-**Type a claim manually**.
+## Testing and quality
+
+```bash
+# backend/
+pytest                                        # 297 tests · no network · no key
+ruff check . ../scripts && ruff format --check . ../scripts
+mypy app                                      # strict
+python ../scripts/scan_secrets.py             # also a CI step
+
+# extension/
+npm test                                      # 41 tests (Vitest + Testing Library)
+npm run typecheck && npm run build
+npm run e2e                                   # real extension in headless Chromium; needs `python -m tests.e2e_server`
+```
+
+What the tests cover:
+
+- **API and pipeline:** contracts, streaming, error mapping and provider diagnostics.
+- **Guardrails and safeguards:** backing sources, attribution and exact quotes, independence,
+  citation integrity.
+- **Retrieval:** ranking, failover, paid-search limits, SSRF and DNS-pinning, verbatim passage
+  checks.
+- **Security:** prompt-injection escaping and secret redaction.
+- **Evaluation:** reference-record validators and the scoring code.
+
+Safeguard regression tests were written to fail on the code before the fix and pass after it
+(see [report §7g](docs/live-validation-report.md#7g-attribution-safeguard-2026-10-14-no-api-calls)).
+
+## Evaluation methodology
+
+Accuracy is **not reported** until it can be measured honestly:
+
+- **Primary metric: the false confident verdict rate.** A confident `supported` /
+  `contradicted` that the reference answer key rejects counts against the system. An
+  `insufficient_evidence` counts as a miss, which is less harmful than a confident error.
+- **Proposition-level scoring.** A compound claim is split into independently testable parts:
+  attribution, chronology, characterization and legal effect. Each part is verified and scored
+  on its own, because a system can be right about the facts and still wrong about who said what.
+- **Provenance is explicit.** Reference records keep four things apart: who located a source,
+  whether the app inspected it, whether a human approved it, and what an AI inferred. The schema
+  stops an AI reviewer from marking a record `human_verified`.
+- **Offline evidence fixtures.** Captured verbatim excerpts replay through the real pipeline, so
+  the evaluator can be tested without live search.
+
+The first reference case (a 2024 US presidential debate claim, five propositions) is
+*AI-reviewed*, so its scores are provisional. See the [evaluation protocol](docs/evaluation.md)
+and the [reference record](eval/reference/en-debate-1200.md).
+
+## Security and privacy
+
+- API keys live only in the backend environment; the extension holds no secrets.
+- The extension asks for `sidePanel` plus host access to `www.youtube.com` and the local backend.
+  It has no `tabs`, `storage`, `<all_urls>` or `webRequest`, and its content script is read-only.
+- User-supplied URLs are never fetched. YouTube URLs are reduced to a validated video ID.
+  Search-mode page fetching is SSRF-guarded: public hosts only, DNS pinning, re-validated
+  redirects, size and time limits.
+- Untrusted text from videos, claims and pages is delimited and escaped in prompts, and the
+  output is schema-validated.
+- Rate limiting, body-size limits and paid-search spend caps are in place.
+
+Details and threat model: [docs/security-privacy.md](docs/security-privacy.md).
 
 ## Known limitations
 
-- **Timestamp alignment is best-effort.** Gemini does not guarantee word-level
-  transcription. The model may choose a neighbouring sentence, which is why
-  confirmation is mandatory. "Exact quote" is a model self-report.
-- **Clip offsets on YouTube URLs are unverified**, and if they are ignored cost
-  scales with video length. Run `--probe-clipping`.
-- Public `youtube.com/watch` videos only; no Shorts, live streams, private or unlisted videos.
-  The Gemini free tier allows 8 h of YouTube video per day.
-- **Excerpts are grounded summaries**, not verbatim page text: Google Search grounding
-  attributes the research model's sentences to sources. The evaluator judges those
-  summaries, not full pages, so open the sources.
-- Source `publisher` and `published_date` are not available from grounding metadata,
-  so they are left empty rather than guessed.
-- The evaluator's per-source stances are themselves model judgements. Guardrails
-  ensure consistency, not correctness.
-- Single-user local backend: no auth, and in-memory cache and rate limiting.
-- The default model ID (`gemini-3.8-flash`) could not be checked against the live API.
-  Verify it with `scripts/list_models.py`.
+- **Timestamp alignment is best-effort.** The model may pick a neighbouring sentence, which is
+  why confirmation is mandatory. "Exact quote" is the model's own claim.
+- **Grounding excerpts are summaries, not page text.** In the default mode the evaluator judges
+  Google's attributed summaries, not full pages.
+- **Per-source stances are model judgements.** Safeguards enforce consistency, not truth.
+- **The attribution check is heuristic.** It detects quotation marks and speaker labels, not
+  meaning, and it errs toward `insufficient_evidence`
+  ([details](docs/live-validation-report.md#7g-attribution-safeguard-2026-10-14-no-api-calls)).
+- **Scope:** public `youtube.com/watch` videos only; no Shorts, live streams, private or
+  unlisted videos.
+- **Single-user local backend:** no auth, and the cache and rate limits are in memory.
 
-## Future ML improvements
+## Roadmap
 
-- **Measured evaluation:** build a labelled set of 100+ EN/RU video moments, track
-  false-confident rate as the primary metric, and run A/B tests on prompts, windows and models.
-- **Better claim localisation:** use official caption tracks where the creator provides
-  them for exact quotes and alignment, plus a claim-detection model to rank candidate
-  sentences in the window.
-- **Read the sources:** fetch cited pages (with SSRF-safe allowlisting or Gemini's URL
-  context tool) and extract verbatim supporting passages. Then add an NLI model to
-  cross-check stances independently of the LLM.
-- **Retrieval quality:** query rewriting per claim type, re-ranking, topic-aware
-  source-quality priors, and detection of syndicated copies beyond URL dedupe.
-- **Calibration:** once enough labelled data exists, learn when to abstain, and only then
-  consider showing calibrated confidence.
-- **Infrastructure:** Redis cache keyed by (video, window) and claim hash; persistent
-  run logs for offline evaluation.
+- [ ] Produce the first live end-to-end verdict on a paid or reset quota, and capture the debate
+      fixture's evidence on a networked machine
+- [ ] Build a human-labelled set of 30–50 EN/RU video moments, then report the false confident
+      rate, extraction accuracy and F1
+- [ ] Use official caption tracks, where available, for exact quotes and alignment
+- [ ] Add NLI-based entailment between quotes and claims, to make the attribution check semantic
+- [ ] Add a Redis cache, per-user quotas and auth for a shared deployment
+
+## Project structure
+
+```
+backend/        FastAPI app: api/, core/, models/, services/ (pipeline), evaluation/
+backend/tests/  297 offline tests; scripted servers for E2E and screenshots
+extension/      Chrome MV3 extension: content/, background/, sidepanel/, components/, shared/
+scripts/        CLI tools: claim PoC, live validation, verify_claim, evidence capture, secret scan
+eval/           reference answer keys, offline evidence fixtures, run artifacts
+docs/           architecture, API, development, evaluation, security, validation reports
+```
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [API reference](docs/api.md) | Endpoints, request and response schemas, error codes |
+| [Development guide](docs/development.md) | Commands, repository layout, manual test plan, troubleshooting provider errors |
+| [Retrieval architecture](docs/retrieval-architecture.md) | Retrievers, search providers, independence, outage semantics, paid-search policy |
+| [Evaluation protocol](docs/evaluation.md) | Datasets, metrics, reference records, offline fixtures |
+| [Live validation report](docs/live-validation-report.md) | Every live run, failure diagnosis, audit findings, the attribution safeguard |
+| [Feasibility study](docs/feasibility.md) | Timestamp-based extraction with Gemini: risks and measurements |
+| [Security and privacy](docs/security-privacy.md) | Data flow, threat model, public-beta blockers |
+| [Windows local validation](docs/windows-local-validation.md) | Step-by-step Windows setup, safe key entry, evidence capture |
+
+## License
+
+No license has been chosen yet. Until one is added, default copyright applies and the code is not licensed for reuse.

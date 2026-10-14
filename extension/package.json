@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "node e2e/smoke.mjs",
-    "e2e:live": "node e2e/live.mjs"
+    "e2e:live": "node e2e/live.mjs",
+    "screenshots": "node e2e/screenshots.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

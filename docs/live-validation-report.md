@@ -549,7 +549,7 @@ absent from the evidence that backs them, and the same rules decide the invented
    grow to 30–50 moments and run `scripts/run_eval.py`. Only then report accuracy and F1.
 3. Run the thinking-level A/B (improvement 2) on the labelled set.
 4. Run the real-youtube.com browser test where YouTube is reachable: `npm run e2e:live`, plus the
-   manual checklist in the README.
+   manual checklist in the [development guide](development.md#testing-the-full-user-flow).
 
 ---
 
