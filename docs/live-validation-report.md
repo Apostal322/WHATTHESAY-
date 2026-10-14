@@ -374,6 +374,35 @@ Both carry the full extraction for review.
 
 Then a person fills in the review section of the sheet.
 
+## 7d. Reference record and third attempt (2026-10-14 09:45–10:07 UTC)
+
+- **Sources supplied by the owner**: ABC transcript, Reuters, Florida DOS Amendment 4 record, Roll Call
+  Factbase transcript.
+  - None is reachable from the development environment: sandbox curl is refused, and the fetch tool
+    gets DNS failures or a block.
+  - They are recorded as `user_supplied`, **not assessed**, and never treated as application-retrieved
+    evidence.
+- **Reference record** `eval/reference/en-debate-1200.{json,md}` (schema `app/evaluation/reference.py`):
+  - the moderator's claim is split into P1 (Trump called six weeks too short), P2 (he would vote no on
+    Amendment 4), P3 ("the very next day") and P4 ("vote to support the six-week ban", a
+    characterization);
+  - reference verdict **supported** (acceptable: supported, mixed);
+  - evidence stances come from **web-search summaries** of six outlets;
+  - review status `ai_reviewed`, so any score against it is **provisional** and never counted as
+    accuracy.
+- **Pipeline:** 2 bounded attempts at verification, 3 calls in all: 09:46 (3.6 and 3.8, both 503) and
+  10:06 (3.6, 503). No verdict; nothing billed.
+- **Code:**
+  - `verify_claim.py` now scores each run against `eval/reference/<id>.json` when one exists, marked
+    PROVISIONAL unless human-verified;
+  - 13 offline regression tests pin the case's shape. They check attribution versus characterization,
+    that the speaker and date context reach both prompts, that the syndicated report counts once, that
+    a confident `contradicted` without contradicting evidence is downgraded, and that a well-explained
+    `mixed` is kept.
+- **Remaining blocker:** inference capacity. Every Gemini Flash call today returned 503 except the
+  02:55 extraction and the 03:22 analysis. The same claim then needs 2 calls with Brave or the supplied
+  pages (analysis, evaluation), or 3 with grounding.
+
 ## 8. Remaining steps
 
 1. Re-run the failed stages (§4 command) on a billed key or after the free-tier reset, then fill in the

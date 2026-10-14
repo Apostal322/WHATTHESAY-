@@ -1,0 +1,70 @@
+{
+  "id": "en-debate-1200",
+  "video_url": "https://www.youtube.com/watch?v=VgsC_aBquUE",
+  "video_timestamp_sec": 1200,
+  "transcript_timestamp_note": "The ABC transcript has no timestamps; its position in the video was not cross-checked. The video position comes from the evaluation case (1200 s) and the extraction window (1155-1210 s). Do not assume transcript order maps to these seconds.",
+  "speaker": "Linsey Davis (ABC News moderator), addressing Donald Trump",
+  "speaker_status": "corroborated_secondary",
+  "quote": "In your home state of Florida, you surprised many with regard to your six-week abortion ban because you initially had said that it was too short and you said quote I'm going to be voting that we need more than six weeks, but then the very next day you reversed course and said you would vote to support the six-week ban.",
+  "quote_status": "model_reported",
+  "claim": "Before the debate, Trump first said Florida's six-week abortion ban was too short and that he would vote that 'we need more than six weeks', and the very next day said he would vote to support the six-week ban.",
+  "context": "ABC News presidential debate, Philadelphia, 10 September 2024; a moderator's question to Donald Trump. The claim describes Trump's statements of late August 2024 about Florida's six-week abortion law and the November 2024 ballot measure Amendment 4. It must be judged on what was on record by 10 September 2024.",
+  "propositions": [
+    {
+      "id": "P1",
+      "text": "In late August 2024 Trump said Florida's six-week abortion limit was too short and that he would be 'voting that we need more than six weeks'.",
+      "kind": "attribution",
+      "reference_verdict": "supported",
+      "rationale": "Reported by several outlets from an NBC News interview (reported 29 August 2024). This concerns his criticism of the six-week LIMIT, which is a different thing from his vote on Amendment 4."
+    },
+    {
+      "id": "P2",
+      "text": "Trump then said he would vote against Florida's Amendment 4, the abortion-rights ballot measure.",
+      "kind": "attribution",
+      "reference_verdict": "supported",
+      "rationale": "Reported from a Fox News interview of 30 August 2024 ('I will be voting no')."
+    },
+    {
+      "id": "P3",
+      "text": "The second statement came 'the very next day' after the first.",
+      "kind": "temporal",
+      "reference_verdict": "supported",
+      "rationale": "29 August (NBC) then 30 August (Fox) 2024, per the reports. Caveat: sources differ slightly on when the NBC interview was recorded versus aired."
+    },
+    {
+      "id": "P4",
+      "text": "Saying he would vote against Amendment 4 amounts to saying he 'would vote to support the six-week ban'.",
+      "kind": "characterization",
+      "reference_verdict": "mixed",
+      "rationale": "In effect yes: Amendment 4 would have invalidated the six-week law, so a 'no' vote keeps it in force, and some outlets headlined it as voting 'to uphold' the ban. But Trump did not say he supported the six-week ban; his campaign reiterated that he believes six weeks is too short. The moderator's wording is a characterization of the vote's effect, not his words."
+    }
+  ],
+  "evidence": [
+    {"id": "U1", "url": "https://www-cdn.abcnews.com/Politics/harris-trump-presidential-debate-transcript/story?id=113560542", "publisher": "ABC News", "published": "2024-09-10", "provenance": "user_supplied", "opened_by_reviewer": false, "stances": {}, "note": "Debate transcript. Needed to verify the quote and speaker. Not reachable from the development environment."},
+    {"id": "U2", "url": "https://www.reuters.com/world/us/trump-says-hell-vote-against-florida-amendment-enshrining-abortion-rights-2024-08-30/", "publisher": "Reuters", "published": "2024-08-30", "provenance": "user_supplied", "opened_by_reviewer": false, "stances": {}, "note": "Expected to bear on P2/P3. Not reachable; stance not assessed."},
+    {"id": "U3", "url": "https://constitutionalinitiatives.dos.fl.gov/Home/InitDetail?account=83927&seqnum=1", "publisher": "Florida Department of State", "published": null, "provenance": "user_supplied", "opened_by_reviewer": false, "stances": {}, "note": "Official Amendment 4 record (primary source for what the measure would do, i.e. P4). Not reachable; stance not assessed."},
+    {"id": "U4", "url": "https://rollcall.com/factbase/trump/transcript/donald-trump-interview-bryan-llenas-fox-news-august-30-2024/", "publisher": "Roll Call Factbase", "published": "2024-08-30", "provenance": "user_supplied", "opened_by_reviewer": false, "stances": {}, "note": "Primary transcript of the Fox News interview (P2). Not reachable; stance not assessed."},
+    {"id": "R1", "url": "https://www.axios.com/2024/08/29/trump-abortion-limit-too-short", "publisher": "Axios", "published": "2024-08-29", "provenance": "reviewer_search_summary", "opened_by_reviewer": false, "stances": {"P1": "supports"}, "note": "Headline 'Trump: Six-week abortion limit is \"too short\"'."},
+    {"id": "R2", "url": "https://floridaphoenix.com/2024/08/29/donald-trump-says-floridas-6-week-abortion-law-is-too-short/", "publisher": "Florida Phoenix", "published": "2024-08-29", "provenance": "reviewer_search_summary", "opened_by_reviewer": false, "stances": {"P1": "supports"}, "note": "Also republished by Louisiana Illuminator (same newsroom network): one origin."},
+    {"id": "R3", "url": "https://www.foxnews.com/politics/trump-opposes-floridas-amendment-4-which-offers-unfettered-abortion-access-its-radical", "publisher": "Fox News", "published": "2024-08-30", "provenance": "reviewer_search_summary", "opened_by_reviewer": false, "stances": {"P2": "supports"}, "note": "Outlet that conducted the interview: 'Trump comes out against Florida abortion ballot measure'."},
+    {"id": "R4", "url": "https://www.catholicnewsagency.com/news/259037/trump-says-he-will-vote-no-on-florida-pro-abortion-amendment", "publisher": "Catholic News Agency", "published": "2024-08-30", "provenance": "reviewer_search_summary", "opened_by_reviewer": false, "stances": {"P1": "supports", "P2": "supports", "P3": "supports", "P4": "partially_supports"}, "note": "Summary: 'I will be voting no'; the earlier NBC remark called six weeks too short; the amendment would invalidate the six-week and 15-week laws. Syndicated by NC Register / EWTN: one origin."},
+    {"id": "R5", "url": "https://www.cbsnews.com/amp/news/trump-florida-abortion-ban-amendment-vote", "publisher": "CBS News", "published": "2024-08-30", "provenance": "reviewer_search_summary", "opened_by_reviewer": false, "stances": {"P2": "supports", "P4": "partially_supports"}, "note": "Headline frames the no vote as voting 'to uphold Florida's 6-week abortion ban': a press characterization, not Trump's words."},
+    {"id": "R6", "url": "https://www.oursundayvisitor.com/trump-calls-florida-6-week-abortion-ban-protecting-most-unborn-children-too-short/", "publisher": "OSV News", "published": "2024-08-30", "provenance": "reviewer_search_summary", "opened_by_reviewer": false, "stances": {"P1": "supports", "P2": "supports", "P4": "partially_supports"}, "note": "Includes the campaign line that Trump 'simply reiterated that he believes six weeks is too short': cuts against reading the no vote as support for the ban itself."}
+  ],
+  "reference_verdict": "supported",
+  "acceptable_verdicts": ["supported", "mixed"],
+  "verdict_rationale": "The checkable substance is supported: within about a day Trump went from saying six weeks was too short and he'd vote for more than six weeks (P1) to saying he'd vote against Amendment 4 (P2, P3). 'Said you would vote to support the six-week ban' (P4) is the moderator's characterization of the effect of a no vote. It is accurate in effect but not his wording, and he kept calling six weeks too short. 'supported' with that caveat is the reference. 'mixed', with an explanation separating effect from wording, is also defensible. 'contradicted' would be a false confident verdict; 'insufficient_evidence' would be a miss.",
+  "review": {
+    "reviewer": "Claude (AI assistant) for the project owner",
+    "reviewer_kind": "ai_assistant",
+    "status": "ai_reviewed",
+    "date": "2026-10-14",
+    "method": "Web-search result summaries (search tool) for the R* sources. No page was opened: the development environment's network policy denies all four user-supplied hosts and the publishers above (sandbox curl: connection refused; fetch tool: DNS failure / blocked). Nothing here was retrieved by the application.",
+    "open_items": [
+      "Verify the quote word for word and the speaker against the ABC transcript (U1) or the video.",
+      "Open U2-U4 and record their stances; U3 is the primary source for P4 (what Amendment 4 would have done).",
+      "Confirm the NBC interview date (recorded vs aired) for P3.",
+      "A human reviewer signs off: set review.status to human_verified and reviewer_kind to human."
+    ]
+  }
+}

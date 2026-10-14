@@ -145,3 +145,25 @@ def test_committed_artifact_can_be_reused_without_re_extraction(tmp_path: Path) 
     art.write_text(json.dumps(vc.artifact(item, None, None, 0, {})))
     again = vc.load_input(_args(from_run=str(art)))
     assert again == item
+
+
+def test_reference_score_is_provisional_for_the_ai_reviewed_debate_case() -> None:
+    s = vc.reference_score("en-debate-1200", "contradicted")
+    assert s is not None
+    assert s["false_confident"] is True and s["counted"] is False
+    assert s["reference_review_status"] == "ai_reviewed"
+    assert vc.reference_score("en-debate-1200", None)["outcome"] == "no_verdict"
+    assert vc.reference_score("no-such-case", "supported") is None
+
+
+async def test_artifact_and_sheet_carry_the_reference_score(settings: Settings) -> None:
+    llm = FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ProviderError("busy", diagnostics={"http_status": 503})
+        }
+    )
+    item = vc.load_input(_args(claim="x claim text", id="en-debate-1200"))
+    resp, err, _ = await vc.run(item, settings, llm)
+    a = vc.artifact(item, resp, err, 1, {})
+    assert a["reference_score"]["outcome"] == "no_verdict"
+    assert "PROVISIONAL" in vc.render_markdown(a)

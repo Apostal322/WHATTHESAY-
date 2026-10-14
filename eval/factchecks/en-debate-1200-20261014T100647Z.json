@@ -1,0 +1,67 @@
+{
+  "id": "en-debate-1200",
+  "input_method": "video_extraction",
+  "claim": "Donald Trump initially stated that Florida's six-week abortion ban was too short and that he would vote for more than six weeks, before stating the following day that he would vote to support the six-week ban.",
+  "context": "During the 2024 presidential debate between Donald Trump and Kamala Harris, moderator Linsey Davis questioned Trump about his shifting positions on abortion rights and Florida's six-week abortion ban.",
+  "language": "en",
+  "video": {
+    "url": "https://www.youtube.com/watch?v=VgsC_aBquUE",
+    "timestamp_sec": 1200.0,
+    "window": {
+      "start_sec": 1155,
+      "end_sec": 1210
+    }
+  },
+  "extraction": {
+    "run": "live-20261014T025540Z",
+    "model": "gemini-3.6-flash",
+    "claim_type": "factual",
+    "evidence_from_video": "In your home state of Florida, you surprised many with regard to your six-week abortion ban because you initially had said that it was too short and you said quote I'm going to be voting that we need more than six weeks, but then the very next day you reversed course and said you would vote to support the six-week ban.",
+    "is_exact_quote_model_reported": true,
+    "quote_verified": false,
+    "speaker_verified": false,
+    "latency_ms": 9725,
+    "usage": {
+      "prompt_tokens": 3576,
+      "output_tokens": 1246,
+      "total_tokens": 4822,
+      "video_tokens": 3158,
+      "audio_tokens": null,
+      "search_queries": 0,
+      "estimated_cost_usd": 0.007354
+    }
+  },
+  "run_meta": {
+    "run_at": "2026-10-14T10:06:47+00:00",
+    "verification_model": "gemini-3.6-flash",
+    "fallback_model": null,
+    "retrieval_backend": "gemini_grounding",
+    "max_retries": 0,
+    "prices": {
+      "input_per_M": 0.75,
+      "output_per_M": 3.75,
+      "search_per_1k": 14.0
+    }
+  },
+  "latency_ms": 4892,
+  "verification": {
+    "error": "provider_error",
+    "message": "The AI provider had a server error. Try again.",
+    "diagnostics": {
+      "operation": "structured_json",
+      "model": "gemini-3.6-flash",
+      "http_status": 503,
+      "provider_status": "UNAVAILABLE",
+      "provider_message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later."
+    }
+  },
+  "review": {
+    "status": "unreviewed",
+    "reviewer": null,
+    "quote_checked_against_video_or_transcript": null,
+    "speaker_checked": null,
+    "sources_opened": null,
+    "verdict_agrees": null,
+    "notes": null
+  }
+}

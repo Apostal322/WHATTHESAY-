@@ -77,7 +77,7 @@ given). Last updated 2026-10-14.
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | Verified with mocks: 213 backend tests (ruff, format, mypy clean) |
+| Backend API, pipeline, guardrails, error handling | Verified with mocks: 229 backend tests (ruff, format, mypy clean) |
 | Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 39 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
 | Video claim extraction (Gemini, clipped YouTube window) | **Verified live**: 4/6 cases on `gemini-3.8-flash` (2026-10-13) and 1 case on `gemini-3.6-flash` (2026-10-14, 9.7 s). Extractions are **unlabelled**: no accuracy is claimed, and the model's "exact quote" flag and speaker are unverified |
 | Clip offsets reduce processed video | **Verified live** on `gemini-3.8-flash`: media tokens scaled 2.50× for a 2.50× window in 3/3 paired runs |
@@ -86,7 +86,7 @@ given). Last updated 2026-10-14.
 | Brave / SearXNG search, page quoting, citation checks, independence | Verified with mocks. **Blocked live**: no Brave key, and the dev sandbox denies search and publisher sites. See [architecture](docs/retrieval-architecture.md) |
 | Model fallback on 503; per-step model recording | Verified with mocks; fallback **verified live** once (3.8 → 3.6 served the extraction) |
 | Real youtube.com page in Chrome | **Blocked**: YouTube is denied in the dev sandbox. Script: `npm run e2e:live` |
-| Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)) |
+| Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)). One AI-reviewed reference record exists (`eval/reference/en-debate-1200`); scores against it are provisional |
 | Public deployment | Not ready: see the public-beta blockers in [security & privacy](docs/security-privacy.md) and report §7 (NO-GO) |
 
 ## Setup (Windows)
@@ -234,7 +234,7 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 
 ```bash
 # backend (from backend/)
-pytest                    # 199 tests, no network, no key
+pytest                    # 229 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 

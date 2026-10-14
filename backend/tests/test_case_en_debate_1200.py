@@ -1,0 +1,257 @@
+"""Regression tests for the real-world case en-debate-1200 (ABC debate, 10 Sep 2024).
+
+OFFLINE FIXTURES, NOT LIVE VALIDATION. The model is scripted; what is tested is how the
+application handles this case's shape (attribution vs. characterization, syndicated sources,
+historical context), plus the integrity rules of its reviewed reference record. The live
+attempts and their status are recorded in docs/live-validation-report.md.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from app.core.config import Settings
+from app.evaluation.reference import ReferenceRecord, score_verdict
+from app.models.schemas import VerifyRequest
+from app.services.citations import EvidenceSource
+from app.services.retrieval import RetrievalResult
+from app.services.verification import VerificationService
+from tests.conftest import FakeLLM
+
+REF_PATH = Path(__file__).resolve().parents[2] / "eval" / "reference" / "en-debate-1200.json"
+REF = ReferenceRecord.model_validate(json.loads(REF_PATH.read_text(encoding="utf-8")))
+
+CONTEXT = (
+    "ABC News presidential debate, 10 September 2024. Moderator Linsey Davis to Donald Trump, "
+    "about his late-August 2024 statements on Florida's six-week abortion law and Amendment 4."
+)
+ANALYSIS = {
+    "normalized_claim": REF.claim,
+    "claim_type": "factual",
+    "is_checkworthy": True,
+    "search_queries": [
+        "Trump Florida six-week ban too short NBC August 2024",
+        "Trump vote no Amendment 4 Fox News August 30 2024",
+    ],
+    "scope_notes": "Statements of 29-30 August 2024; judge as of 10 September 2024.",
+    "reason": "",
+}
+# Fixture text written for these tests (paraphrasing the reported facts); not page captures.
+NBC = "Trump told NBC News that six weeks is too short and that he is going to be voting that we need more than six weeks."
+FOX = "In a Fox News interview on Friday, Aug. 30, 2024, Trump said he will be voting no on Amendment 4, the Florida abortion-rights ballot measure."
+SYNDICATED = "Trump said Friday he will vote no on Florida's Amendment 4 after saying a day earlier that the state's six-week limit was too short; the amendment would invalidate the six-week law."
+
+
+def _sources() -> list[EvidenceSource]:
+    return [
+        EvidenceSource(
+            "S1",
+            "https://www.axios.com/2024/08/29/x",
+            "Axios",
+            "axios.com",
+            [NBC],
+            origin="page_text",
+        ),
+        EvidenceSource(
+            "S2",
+            "https://www.foxnews.com/politics/x",
+            "Fox News",
+            "foxnews.com",
+            [FOX],
+            origin="page_text",
+        ),
+        EvidenceSource(
+            "S3",
+            "https://www.catholicnewsagency.com/news/x",
+            "CNA",
+            "catholicnewsagency.com",
+            [SYNDICATED],
+            origin="page_text",
+        ),
+        EvidenceSource(
+            "S4",
+            "https://www.ewtnnews.com/world/x",
+            "EWTN",
+            "ewtnnews.com",
+            [SYNDICATED],
+            origin="page_text",
+        ),
+    ]
+
+
+class Retriever:
+    name = "search"
+
+    async def retrieve(self, **kw: object) -> RetrievalResult:
+        return RetrievalResult(
+            sources=_sources(), executed_queries=ANALYSIS["search_queries"], backend="fixture"
+        )
+
+
+def _llm(evaluation: dict[str, object]) -> FakeLLM:
+    return FakeLLM(json_responses={"ClaimAnalysisOutput": ANALYSIS, "EvaluationOutput": evaluation})
+
+
+def _assess(stances: dict[str, str]) -> list[dict[str, str]]:
+    return [{"source_id": sid, "stance": st, "note": "n"} for sid, st in stances.items()]
+
+
+# ------------------------------------------------------------------ reference record integrity
+
+
+def test_reference_record_is_ai_reviewed_and_never_counted_as_ground_truth() -> None:
+    assert REF.review.status != "human_verified"
+    assert REF.review.reviewer_kind == "ai_assistant"
+    assert score_verdict("supported", REF)["counted"] is False
+
+
+def test_unverified_wording_and_unopened_sources_are_labelled_as_such() -> None:
+    assert REF.quote_status != "verified_verbatim"
+    assert all(not e.opened_by_reviewer for e in REF.evidence)
+    user = [e for e in REF.evidence if e.provenance == "user_supplied"]
+    assert len(user) == 4 and all(not e.stances for e in user)  # supplied, never assessed unread
+    assert not any(e.provenance == "app_retrieved" for e in REF.evidence)
+
+
+def test_criticism_of_the_limit_is_kept_apart_from_the_amendment_vote() -> None:
+    kinds = {p.id: (p.kind, p.reference_verdict) for p in REF.propositions}
+    assert kinds["P1"] == ("attribution", "supported")  # 'six weeks is too short'
+    assert kinds["P2"] == ("attribution", "supported")  # 'voting no' on Amendment 4
+    assert kinds["P4"] == ("characterization", "mixed")  # 'vote to support the six-week ban'
+
+
+@pytest.mark.parametrize(
+    ("verdict", "acceptable", "false_confident"),
+    [
+        ("supported", True, False),
+        ("mixed", True, False),
+        ("contradicted", False, True),
+        ("insufficient_evidence", False, False),  # a miss, not a dangerous error
+        ("not_verifiable", False, False),
+    ],
+)
+def test_scoring_against_the_reference(
+    verdict: str, acceptable: bool, false_confident: bool
+) -> None:
+    s = score_verdict(verdict, REF)  # type: ignore[arg-type]
+    assert (s["acceptable"], s["false_confident"]) == (acceptable, false_confident)
+
+
+def test_reference_rejects_inconsistent_records() -> None:
+    raw = json.loads(REF_PATH.read_text(encoding="utf-8"))
+    raw["acceptable_verdicts"] = ["mixed"]
+    with pytest.raises(ValueError):
+        ReferenceRecord.model_validate(raw)
+
+
+# ------------------------------------------------------------------ pipeline behaviour on this case
+
+
+async def test_context_with_speaker_and_date_reaches_analysis_and_evaluation(
+    settings: Settings,
+) -> None:
+    llm = _llm(
+        {
+            "source_assessments": _assess(
+                {"S1": "supports", "S2": "supports", "S3": "supports", "S4": "supports"}
+            ),
+            "verdict": "supported",
+            "explanation": "He called six weeks too short [S1] and then said he would vote no [S2].",
+            "key_findings": [],
+            "limitations": [],
+        }
+    )
+    await VerificationService(llm, settings, retriever=Retriever()).verify(
+        VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
+    )
+    analysis_prompt, eval_prompt = llm.calls[0][1]["prompt"], llm.calls[-1][1]["prompt"]
+    for prompt in (analysis_prompt, eval_prompt):
+        assert "Linsey Davis" in prompt and "10 September 2024" in prompt
+    assert "keep attributions" in eval_prompt
+
+
+async def test_syndicated_report_counts_once_and_is_flagged_to_the_evaluator(
+    settings: Settings,
+) -> None:
+    llm = _llm(
+        {
+            "source_assessments": _assess(
+                {"S1": "supports", "S2": "supports", "S3": "supports", "S4": "supports"}
+            ),
+            "verdict": "supported",
+            "explanation": "Supported [S1][S2].",
+            "key_findings": [],
+            "limitations": [],
+        }
+    )
+    resp = await VerificationService(llm, settings, retriever=Retriever()).verify(
+        VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
+    )
+    assert "same site or same original report as S4" in llm.calls[-1][1]["prompt"]
+    assert resp.independent_source_count == 3  # Axios, Fox, CNA=EWTN
+    assert score_verdict(resp.verdict, REF)["acceptable"]
+
+
+async def test_contradicted_verdict_without_contradicting_evidence_is_downgraded(
+    settings: Settings,
+) -> None:
+    # A model that answers the *characterization* ("he never said he supports the ban") with a
+    # confident 'contradicted' while its own stances only support the factual parts.
+    llm = _llm(
+        {
+            "source_assessments": _assess(
+                {
+                    "S1": "supports",
+                    "S2": "supports",
+                    "S3": "partially_supports",
+                    "S4": "partially_supports",
+                }
+            ),
+            "verdict": "contradicted",
+            "explanation": "Trump never said he supports the six-week ban.",
+            "key_findings": [],
+            "limitations": [],
+        }
+    )
+    resp = await VerificationService(llm, settings, retriever=Retriever()).verify(
+        VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
+    )
+    assert resp.verdict == "insufficient_evidence"
+    assert not score_verdict(resp.verdict, REF)["false_confident"]
+
+
+async def test_mixed_verdict_separating_effect_from_wording_is_kept(settings: Settings) -> None:
+    llm = _llm(
+        {
+            "source_assessments": _assess(
+                {
+                    "S1": "supports",
+                    "S2": "supports",
+                    "S3": "partially_supports",
+                    "S4": "partially_supports",
+                }
+            ),
+            "verdict": "mixed",
+            "explanation": "The reversal is documented [S1][S2]; 'support the ban' describes the effect of a no vote, not his words [S3].",
+            "key_findings": [
+                {
+                    "text": "Called six weeks too short [S1].",
+                    "stance": "supports",
+                    "source_ids": ["S1"],
+                },
+                {
+                    "text": "Said he would vote no on Amendment 4 [S2].",
+                    "stance": "supports",
+                    "source_ids": ["S2"],
+                },
+            ],
+            "limitations": [],
+        }
+    )
+    resp = await VerificationService(llm, settings, retriever=Retriever()).verify(
+        VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
+    )
+    assert resp.verdict == "mixed"
+    assert [f.source_ids for f in resp.key_findings] == [["S1"], ["S2"]]
+    assert score_verdict(resp.verdict, REF)["acceptable"]

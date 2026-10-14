@@ -34,11 +34,29 @@ from app.api.deps import build_search_retriever
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging
+from app.evaluation.reference import ReferenceRecord, score_verdict
 from app.models.schemas import VerifyRequest, VerifyResponse
 from app.services.llm import GeminiClient, LLMClient
 from app.services.verification import VerificationService
 
 OUT_DIR = REPO / "eval" / "factchecks"
+REFERENCE_DIR = REPO / "eval" / "reference"
+
+
+def reference_score(
+    case_id: str, verdict: str | None, ref_dir: Path = REFERENCE_DIR
+) -> dict[str, Any] | None:
+    """Score against eval/reference/<id>.json when one exists (provisional unless human-verified)."""
+    path = ref_dir / f"{case_id}.json"
+    if not path.exists():
+        return None
+    ref = ReferenceRecord.model_validate(json.loads(path.read_text(encoding="utf-8")))
+    return {
+        **score_verdict(verdict, ref),  # type: ignore[arg-type]
+        "reference_verdict": ref.reference_verdict,
+        "acceptable_verdicts": ref.acceptable_verdicts,
+        "reference_review_status": ref.review.status,
+    }
 
 
 def load_input(args: argparse.Namespace) -> dict[str, Any]:
@@ -104,6 +122,8 @@ def artifact(
         }
     elif resp is not None:
         out["verification"] = resp.model_dump()
+    verdict = resp.verdict if resp is not None else None
+    out["reference_score"] = reference_score(item["id"], verdict)
     out["review"] = {
         "status": "unreviewed",
         "reviewer": None,
@@ -188,6 +208,16 @@ def render_markdown(a: dict[str, Any]) -> str:
                 f"| {s['id']} | {s.get('stance')} | {s.get('domain')} | "
                 f"{s.get('excerpt_origin')} | {s['url']} | {ex} | | |"
             )
+    rs = a.get("reference_score")
+    if rs:
+        counted = "counted" if rs["counted"] else "PROVISIONAL: reference is not human-verified"
+        lines += [
+            "",
+            "## Against the reference record",
+            f"- Reference verdict: {rs['reference_verdict']} (acceptable: {rs['acceptable_verdicts']}; "
+            f"review status {rs['reference_review_status']})",
+            f"- Outcome: {rs['outcome']} · false confident: {rs.get('false_confident')} · {counted}",
+        ]
     lines += ["", "## Review (by hand)", ""]
     lines += [f"- {k}: " for k in a["review"]]
     return "\n".join(lines) + "\n"
