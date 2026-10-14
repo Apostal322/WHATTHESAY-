@@ -41,6 +41,16 @@ class ClaimAnalysisOutput(BaseModel):
         default=None,
         description="Time period, geography, definitions or numbers that the check depends on.",
     )
+    attributed_to: str = Field(
+        default="",
+        description="If the claim is about what a specific person or organization said or "
+        "wrote (not about the facts themselves), who; otherwise empty.",
+    )
+    exact_words: list[str] = Field(
+        default_factory=list,
+        description="Words the claim presents as that speaker's exact wording; empty if the "
+        "claim paraphrases.",
+    )
 
 
 class SourceAssessment(BaseModel):

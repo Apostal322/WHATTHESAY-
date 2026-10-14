@@ -77,8 +77,8 @@ given). Last updated 2026-10-14.
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | Verified with mocks: 273 backend tests (ruff, format, mypy clean) |
-| Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 39 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
+| Backend API, pipeline, guardrails, error handling | Verified with mocks: 297 backend tests (ruff, format, mypy clean) |
+| Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 41 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
 | Video claim extraction (Gemini, clipped YouTube window) | **Verified live**: 4/6 cases on `gemini-3.8-flash` (2026-10-13) and 1 case on `gemini-3.6-flash` (2026-10-14, 9.7 s). Extractions are **unlabelled**: no accuracy is claimed, and the model's "exact quote" flag and speaker are unverified |
 | Clip offsets reduce processed video | **Verified live** on `gemini-3.8-flash`: media tokens scaled 2.50× for a 2.50× window in 3/3 paired runs |
 | Claim analysis (type, queries) | **Verified live** once (`gemini-3.6-flash`, 2026-10-14); output not retained (fixed since: see report §7c) |
@@ -88,7 +88,8 @@ given). Last updated 2026-10-14.
 | Real youtube.com page in Chrome | **Blocked**: YouTube is denied in the dev sandbox. Script: `npm run e2e:live` |
 | Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)). One AI-reviewed reference record exists (`eval/reference/en-debate-1200`, five propositions); scores against it are provisional and never reported as accuracy |
 | Offline evidence fixture + proposition-level runs | Implemented and verified with mocks (synthetic pages): capture, offline retriever, quotation check, chronology, per-proposition scoring. The real fixture (`eval/fixtures/en-debate-1200`) has **no captured excerpts yet**: every source host is blocked from the dev sandbox. Capture runs locally: [Windows guide](docs/windows-local-validation.md) §5 |
-| Quoted words vs. sources | Verified with mocks: quotations in the explanation and findings that are not verbatim in cited page text are flagged in `guardrail_notes` |
+| Quoted words vs. sources | Verified with mocks: quotations in the explanation and findings that are not verbatim in cited page text are flagged in `guardrail_notes` (a warning) |
+| Claims about what someone said | Verified with mocks: a confident verdict needs the speaker's own words (quotation or transcript line) and any quoted wording verbatim, in page text or two independent sources; otherwise it becomes `insufficient_evidence`, recorded in `verdict_adjustments` (a safeguard). Heuristic, not semantic: [report](docs/live-validation-report.md) §7g |
 | Public deployment | Not ready: see the public-beta blockers in [security & privacy](docs/security-privacy.md) and report §7 (NO-GO) |
 
 ## Setup (Windows)
@@ -233,19 +234,21 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 `explanation` (with `[S#]` citations), `key_findings`, `sources[]` (`id`, `title`, `url`,
 `domain`, `retrieved_at`, `excerpts`, `stance`, `assessment_note`; `publisher` and
 `published_date` are `null` unless known, never guessed), `limitations`,
-`search_queries`, `independent_source_count`, `guardrail_notes` and `usage`.
+`search_queries`, `independent_source_count`, `guardrail_notes` (advisory warnings),
+`verdict_adjustments` (safeguards that changed the model's verdict: `rule`, `from_verdict`,
+`to_verdict`, `reason`) and `usage`.
 
 ## Development
 
 ```bash
 # backend (from backend/)
-pytest                    # 273 tests, no network, no key
+pytest                    # 297 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 python ../scripts/scan_secrets.py            # tracked files (CI); add --staged before a commit
 
 # extension (from extension/)
-npm test                  # vitest + Testing Library (39 tests)
+npm test                  # vitest + Testing Library (41 tests)
 npm run typecheck
 npm run build
 npm run e2e               # needs the build + a backend on :8000 (see above)

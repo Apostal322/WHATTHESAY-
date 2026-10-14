@@ -4,6 +4,12 @@ import { CitedText } from "./CitedText";
 
 export function VerdictCard({ result }: { result: VerifyResponse }) {
   const ids = new Set(result.sources.map((s) => s.id));
+  const adjustments = result.verdict_adjustments ?? [];
+  // The backend also states each verdict change as a guardrail note for older clients; shown
+  // once here, in the safeguard notice.
+  const warnings = adjustments.length
+    ? result.guardrail_notes.filter((n) => !n.startsWith("Verdict changed from '"))
+    : result.guardrail_notes;
   return (
     <section className={`card verdict verdict-${result.verdict}`} aria-labelledby="verdict-title">
       <div className="verdict-head">
@@ -13,6 +19,19 @@ export function VerdictCard({ result }: { result: VerifyResponse }) {
         <span className="badge">{CLAIM_TYPE_LABEL[result.claim_type]}</span>
       </div>
       <p className="verdict-summary">{VERDICT_SUMMARY[result.verdict]}</p>
+
+      {adjustments.length > 0 && (
+        <div className="safeguard" role="note" aria-label="Safeguard applied">
+          <strong>Safeguard applied: the model's verdict was not accepted.</strong>
+          <ul>
+            {adjustments.map((a, i) => (
+              <li key={i}>
+                Model said “{VERDICT_LABEL[a.from_verdict]}”, shown as “{VERDICT_LABEL[a.to_verdict]}”: {a.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <p className="claim-quote">“{result.claim}”</p>
       {result.normalized_claim.trim() !== result.claim.trim() && (
@@ -46,11 +65,11 @@ export function VerdictCard({ result }: { result: VerifyResponse }) {
         </>
       )}
 
-      {(result.limitations.length > 0 || result.guardrail_notes.length > 0) && (
+      {(result.limitations.length > 0 || warnings.length > 0) && (
         <>
           <h3 className="section-title">Limitations</h3>
           <ul className="limitations">
-            {result.guardrail_notes.map((n, i) => (
+            {warnings.map((n, i) => (
               <li key={`g${i}`}>{n}</li>
             ))}
             {result.limitations.map((n, i) => (

@@ -132,6 +132,19 @@ class KeyFinding(BaseModel):
     source_ids: list[str]
 
 
+class VerdictAdjustment(BaseModel):
+    """A deterministic safeguard that changed the model's verdict (not an advisory warning)."""
+
+    rule: Literal[
+        "verdict_without_backing_source",
+        "attribution_without_direct_evidence",
+        "exact_quote_not_confirmed",
+    ]
+    from_verdict: Verdict
+    to_verdict: Verdict
+    reason: str
+
+
 class VerifyResponse(BaseModel):
     claim: str
     normalized_claim: str
@@ -147,6 +160,11 @@ class VerifyResponse(BaseModel):
     )
     guardrail_notes: list[str] = Field(
         description="Deterministic post-checks that changed or qualified the model's output."
+    )
+    verdict_adjustments: list[VerdictAdjustment] = Field(
+        default_factory=list,
+        description="Safeguards that changed the verdict, in order. Empty when the model's "
+        "verdict stood; guardrail_notes may still carry warnings.",
     )
     model: str
     models_used: dict[str, str] = Field(

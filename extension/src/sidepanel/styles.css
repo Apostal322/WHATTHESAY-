@@ -192,6 +192,11 @@ html, body {
 .findings li, .limitations li { margin: 4px 0; font-size: 13px; }
 .finding { list-style: none; margin-left: -18px !important; display: flex; gap: 8px; align-items: baseline; }
 .limitations li { color: var(--muted); }
+.safeguard {
+  margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; font-size: 13px;
+  background: var(--warn-bg); color: var(--text); border: 1px solid var(--warn);
+}
+.safeguard ul { margin: 4px 0 0; padding-left: 18px; }
 
 .cite {
   display: inline-block; font-size: 10px; line-height: 1; padding: 2px 4px; margin: 0 1px;

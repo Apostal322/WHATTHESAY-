@@ -74,6 +74,14 @@ export interface KeyFinding {
   source_ids: string[];
 }
 
+/** A deterministic safeguard that changed the model's verdict (unlike a guardrail note, a warning). */
+export interface VerdictAdjustment {
+  rule: "verdict_without_backing_source" | "attribution_without_direct_evidence" | "exact_quote_not_confirmed";
+  from_verdict: Verdict;
+  to_verdict: Verdict;
+  reason: string;
+}
+
 export interface VerifyResponse {
   claim: string;
   normalized_claim: string;
@@ -86,6 +94,8 @@ export interface VerifyResponse {
   search_queries: string[];
   independent_source_count: number;
   guardrail_notes: string[];
+  /** Absent from older backends. */
+  verdict_adjustments?: VerdictAdjustment[];
   model: string;
   latency_ms: number;
   cached: boolean;

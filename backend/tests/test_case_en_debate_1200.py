@@ -38,10 +38,14 @@ ANALYSIS = {
     "scope_notes": "Statements of 29-30 August 2024; judge as of 10 September 2024.",
     "reason": "",
 }
-# Fixture text written for these tests (paraphrasing the reported facts); not page captures.
-NBC = "Trump told NBC News that six weeks is too short and that he is going to be voting that we need more than six weeks."
-FOX = "In a Fox News interview on Friday, Aug. 30, 2024, Trump said he will be voting no on Amendment 4, the Florida abortion-rights ballot measure."
-SYNDICATED = "Trump said Friday he will vote no on Florida's Amendment 4 after saying a day earlier that the state's six-week limit was too short; the amendment would invalidate the six-week law."
+# Fixture text written for these tests, modelled on how reports carry the quotations that
+# secondary coverage attributes to Trump; NOT page captures (see eval/fixtures for those).
+NBC = 'Trump told NBC News that six weeks is too short: "I am going to be voting that we need more than six weeks."'
+# Paraphrase-only variants: what the same reports would say without the speaker's words.
+NBC_PARAPHRASE = "Trump told NBC News that six weeks is too short and that he is going to be voting that we need more than six weeks."
+FOX_PARAPHRASE = "In a Fox News interview on Friday, Aug. 30, 2024, Trump said he will be voting no on Amendment 4, the Florida abortion-rights ballot measure."
+FOX = 'In a Fox News interview on Friday, Aug. 30, 2024, Trump said of Amendment 4, the Florida abortion-rights ballot measure: "I will be voting no."'
+SYNDICATED = "Trump said Friday \"I will be voting no\" on Florida's Amendment 4, a day after saying the state's six-week limit was too short; the amendment would invalidate the six-week law."
 
 
 def _sources() -> list[EvidenceSource]:
@@ -244,6 +248,54 @@ async def test_syndicated_report_counts_once_and_is_flagged_to_the_evaluator(
     assert "same site or same original report as S4" in llm.calls[-1][1]["prompt"]
     assert resp.independent_source_count == 3  # Axios, Fox, CNA=EWTN
     assert score_verdict(resp.verdict, REF)["acceptable"]
+    assert resp.verdict_adjustments == []  # the reports carry Trump's own words
+
+
+async def test_paraphrase_only_reports_cannot_confirm_what_trump_said(settings: Settings) -> None:
+    """Same claim and verdict as above, but every report only paraphrases him."""
+
+    class ParaphraseRetriever:
+        name = "search"
+
+        async def retrieve(self, **kw: object) -> RetrievalResult:
+            return RetrievalResult(
+                sources=[
+                    EvidenceSource(
+                        "S1",
+                        "https://www.axios.com/2024/08/29/x",
+                        "Axios",
+                        "axios.com",
+                        [NBC_PARAPHRASE],
+                        origin="page_text",
+                    ),
+                    EvidenceSource(
+                        "S2",
+                        "https://www.foxnews.com/politics/x",
+                        "Fox News",
+                        "foxnews.com",
+                        [FOX_PARAPHRASE],
+                        origin="page_text",
+                    ),
+                ],
+                executed_queries=["q"],
+                backend="fixture",
+            )
+
+    llm = _llm(
+        {
+            "source_assessments": _assess({"S1": "supports", "S2": "supports"}),
+            "verdict": "supported",
+            "explanation": "Supported [S1][S2].",
+            "key_findings": [],
+            "limitations": [],
+        }
+    )
+    resp = await VerificationService(llm, settings, retriever=ParaphraseRetriever()).verify(
+        VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
+    )
+    assert resp.verdict == "insufficient_evidence"
+    assert [a.rule for a in resp.verdict_adjustments] == ["attribution_without_direct_evidence"]
+    assert not score_verdict(resp.verdict, REF)["false_confident"]  # a miss, not a confident error
 
 
 async def test_contradicted_verdict_without_contradicting_evidence_is_downgraded(

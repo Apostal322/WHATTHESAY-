@@ -22,10 +22,12 @@ from app.models.schemas import (
     SourceRef,
     Stance,
     Verdict,
+    VerdictAdjustment,
     VerifyRequest,
     VerifyResponse,
 )
 from app.services import prompts
+from app.services.attribution import apply_attribution_safeguard, detect_attribution
 from app.services.citations import EvidenceSource, format_sources_for_prompt
 from app.services.evidence import origin_groups
 from app.services.llm import LLMClient, Usage
@@ -376,7 +378,30 @@ class VerificationService:
         if dropped:
             notes.append(f"Ignored {dropped} assessment(s) that referenced unknown sources.")
 
+        # Safeguards (verdict changes) are recorded apart from warnings (guardrail notes).
+        adjustments: list[VerdictAdjustment] = []
         verdict, guard_notes = apply_verdict_guardrails(evaluation.verdict, stances, by_id)
+        if verdict != evaluation.verdict:
+            adjustments.append(
+                VerdictAdjustment(
+                    rule="verdict_without_backing_source",
+                    from_verdict=evaluation.verdict,
+                    to_verdict=verdict,
+                    reason="No retrieved source was assessed as backing the model's verdict.",
+                )
+            )
+        attribution = detect_attribution(req.claim, analysis.attributed_to, analysis.exact_words)
+        verdict, attribution_change = apply_attribution_safeguard(
+            verdict, stances, by_id, attribution
+        )
+        if attribution_change is not None:
+            adjustments.append(attribution_change)
+            # There is no longer a verdict for "rests on a single source" to qualify.
+            guard_notes = [n for n in guard_notes if not n.startswith("The verdict rests on")]
+            guard_notes.append(
+                f"Verdict changed from '{attribution_change.from_verdict}' to "
+                f"'{attribution_change.to_verdict}': {attribution_change.reason}"
+            )
         notes += guard_notes
 
         findings: list[KeyFinding] = []
@@ -455,4 +480,5 @@ class VerificationService:
             search_queries=executed_queries,
             independent_source_count=independent_domains(stances, by_id),
             guardrail_notes=notes,
+            verdict_adjustments=adjustments,
         )

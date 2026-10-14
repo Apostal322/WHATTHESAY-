@@ -177,7 +177,9 @@ def test_long_paragraphs_are_cut_to_policy_length() -> None:
 
 # Case-shaped SYNTHETIC texts. They mimic the *kinds* of source involved, not their wording.
 T_TRANSCRIPT = (
-    "SYNTHETIC transcript: CANDIDATE: I will be voting no, because it goes too far. SYNTHETIC."
+    # Speaker labelled by name, as in the Factbase transcripts: an anonymous label would not
+    # show whose words these are (see the attribution speaker check).
+    "SYNTHETIC transcript: DONALD TRUMP: I will be voting no, because it goes too far. SYNTHETIC."
 )
 T_NEWS = (
     "SYNTHETIC headline style: candidate effectively votes to uphold the six-week ban, outlet says."
@@ -431,7 +433,8 @@ async def test_each_proposition_is_verified_and_scored_on_its_own(settings: Sett
     script = {
         "ClaimAnalysisOutput": [_analysis(p.text) for p in ref.propositions],
         "EvaluationOutput": [
-            # P1 six-week position: the wire report backs it.
+            # P1 six-week position: the evaluator leans on the wire report, which only
+            # paraphrases him ("a day after calling six weeks too short").
             _evaluation("supported", {**S, "S1": "irrelevant"}, "Called six weeks too short [S3]."),
             # P2 vote on Amendment 4: the transcript backs it.
             _evaluation("supported", S, "He said “I will be voting no” [S1]."),
@@ -454,16 +457,29 @@ async def test_each_proposition_is_verified_and_scored_on_its_own(settings: Sett
     )
     results = {r.proposition_id: r for r in await verify_propositions(svc, ref)}
 
-    assert results["P1"].score["acceptable"] and results["P2"].score["acceptable"]
+    # P1 quotes his wording ('voting that we need more than six weeks'); the wire report only
+    # paraphrases him -> no confident verdict (a miss, not a confident error).
+    p1 = results["P1"]
+    assert p1.response and p1.response.verdict == "insufficient_evidence"
+    assert [a.rule for a in p1.response.verdict_adjustments] == ["exact_quote_not_confirmed"]
+    assert not p1.score["false_confident"]
+    # P2: the transcript line carries his own words ("DONALD TRUMP: I will be voting no").
+    p2 = results["P2"]
+    assert p2.score["acceptable"] and p2.response and p2.response.verdict_adjustments == []
     assert results["P3"].response and results["P3"].response.verdict == "mixed"
     assert results["P3"].score["acceptable"]
     assert (
         results["P3"].chronology and results["P3"].chronology["status"] == "consistent_unconfirmed"
     )
 
+    # P4: the headline's framing ('would vote to support the six-week ban') taken for his words.
+    # Before the attribution safeguard this produced a confident 'supported', a false
+    # confident verdict against the reference, even though his actual words in the transcript
+    # ("I will be voting no") do not contain that wording.
     p4 = results["P4"]
-    assert p4.response and p4.response.verdict == "supported"
-    assert p4.score["false_confident"]  # 'supported' is not acceptable for the characterization
+    assert p4.response and p4.response.verdict == "insufficient_evidence"
+    assert [a.rule for a in p4.response.verdict_adjustments] == ["exact_quote_not_confirmed"]
+    assert not p4.score["false_confident"]
     assert any("vote to support the six-week ban" in n for n in p4.response.guardrail_notes)
 
     p5 = results["P5"]

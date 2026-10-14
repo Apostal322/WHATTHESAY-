@@ -85,6 +85,8 @@ def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
 - is_checkworthy: true if at least one objectively checkable factual assertion is present.
 - search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language.
 - scope_notes: time period, geography, definitions or measurement details the verdict depends on.
+- attributed_to: if the claim is about what a specific person or organization said or wrote (rather than about the facts themselves), who; otherwise an empty string.
+- exact_words: only words the claim presents as that speaker's exact wording (normally in quotation marks); an empty list if the claim paraphrases.
 {output_language_instruction(language)}"""
 
 
@@ -124,6 +126,7 @@ Rules:
   mixed: parts are supported and parts contradicted, or reliable sources disagree.
   insufficient_evidence: the sources do not settle the claim.
   not_verifiable: the claim is an opinion, prediction, or otherwise not checkable.
+- Claims about what someone said ("X said Y"): only the speaker's own words, a quotation of them or a transcript line, can support or contradict it. An outlet's summary, headline or characterization of what they meant is at most partially_supports or unclear, and words the claim quotes must appear verbatim in a source to be confirmed. Never present an outlet's wording as the speaker's.
 - When in doubt, choose insufficient_evidence. Overstating certainty is worse than admitting uncertainty.
 - Each source states where its excerpts come from: verbatim page text, a search-engine snippet, or a model summary attributed by search grounding. Snippets and summaries are weaker than page text: mention this in limitations if the verdict hinges on one of them."""
 

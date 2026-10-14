@@ -465,11 +465,79 @@ chronology check and the Windows guide. This session audited it and fixed what i
 Brave fail DNS from this environment; only the Gemini API host resolves. The fixture therefore
 remains `pending_capture`: no excerpt exists, and none was written by hand.
 
-**Known gap, not fixed:** the quotation guard is advisory. In the P4 regression test, an evaluator
+**Known gap at the time (fixed in §7g):** the quotation guard is advisory. In the P4 regression test, an evaluator
 that treats CBS's "vote to uphold" framing as Trump's words still yields a confident `supported`.
 The scorer counts that as a false confident verdict and the response carries a guardrail note, but
 the verdict is not changed. A deterministic override would need a reliable attribution check, which
 is not built.
+
+## 7g. Attribution safeguard (2026-10-14, no API calls)
+
+**Defect.** "X said Y" was verified like "Y is true". An outlet's characterization ("Doe
+effectively votes to keep the ban"; CBS's "Trump says he'll vote to uphold…") assessed as
+`supports` was enough for a confident verdict about what the speaker said, in either direction.
+The quotation guard (§7e) only added a warning; the verdict stood.
+
+**Fix (deterministic, after the model's evaluation; `backend/app/services/attribution.py`):**
+
+| Claim kind | How it is recognised | What a `supported` / `contradicted` verdict now needs | Otherwise |
+|---|---|---|---|
+| Factual proposition | none of the below | unchanged (existing guardrails) | n/a |
+| Speaker attribution | reported-speech verb in the claim (EN/RU), or `attributed_to` from the analysis step | the speaker's own words, i.e. a quotation in an excerpt naming them or a transcript line under their label, in a source assessed in the verdict's direction: verbatim page text, or ≥2 independent origins for snippets/model summaries | `insufficient_evidence`, rule `attribution_without_direct_evidence` |
+| Exact quotation | words the claim puts in quotation marks, or `exact_words` from the analysis | for `supported`: those words verbatim in a supporting source, under the same page-text / two-origins rule | `insufficient_evidence`, rule `exact_quote_not_confirmed` |
+
+A moderator restating the claim ("DAVIS: … you said you would vote to support the six-week
+ban") or someone else's quotation does not count as the speaker's words. Syndicated copies
+count as one origin.
+
+**Safeguard vs warning.** A verdict change is now recorded in the new response field
+`verdict_adjustments` (`rule`, `from_verdict`, `to_verdict`, `reason`), separate from
+`guardrail_notes`, which stay advisory. The existing "no source backs the verdict" downgrade is
+recorded there too (`verdict_without_backing_source`). The side panel shows adjustments as
+"Safeguard applied: the model's verdict was not accepted", apart from the Limitations list.
+For older clients the change is also stated once in `guardrail_notes`. The evaluation prompt now
+also tells the model that a characterization is at most `partially_supports` or `unclear` for a
+claim about what someone said; the deterministic check does not rely on that.
+
+**Failing before, passing after.** The new and updated tests were run against checkpoint
+`82b05a2` in a separate worktree. 26 failed there. In 14 of them the verdict itself was wrong:
+the model's confident verdict passed through unchanged. That covers characterization →
+`supported` and → `contradicted`; one snippet quote; a quote from a non-backing source; syndicated
+copies of one quote; different exact words; analysis-flagged exact words and attribution; Russian
+reported speech; a moderator's line; another person's quote; a speaker taken from the analysis;
+paraphrase-only debate reports; and debate P1. The other 12 failed only because the new field or
+module did not exist (cases where the verdict was already right, which pin that it stays right).
+All pass on the fixed code: backend **297** tests (was 273), extension **41** (was 39).
+
+**Debate fixture (`test_fixture_en_debate_1200`, synthetic pages, scripted evaluator):**
+
+| Proposition | Before | After |
+|---|---|---|
+| P1 (quotes "voting that we need more than six weeks"; the wire text paraphrases) | `supported` | `insufficient_evidence`, `exact_quote_not_confirmed` (a miss, not a false confident verdict) |
+| P2 (transcript line "DONALD TRUMP: I will be voting no") | `supported` | `supported`, no adjustment |
+| P4 ("vote to support the six-week ban" taken for his words) | `supported` = **false confident verdict** | `insufficient_evidence`, `exact_quote_not_confirmed`; the quotation warning is kept |
+
+Nothing about Trump or this debate is in the rules. P1/P4 change because their quoted wording is
+absent from the evidence that backs them, and the same rules decide the invented Doe/Roe cases in
+`test_attribution.py`.
+
+**Remaining limits (not fixed):**
+
+1. Direct speech is recognised by quotation marks and speaker labels, not by meaning. Suppose the
+   evaluator misreads the speaker's real words as supporting different content, and the claim
+   quotes no words. Then a confident verdict can still pass. Closing that needs semantic
+   entailment between the quote and the claim, i.e. another model judgement.
+2. The speaker is found heuristically: capitalised words before the speech verb, or the
+   analysis step's `attributed_to`. With no name found, any quotation or label counts.
+3. Claims that cite a report ("the study says") are treated as attributions; single-quoted
+   emphasis in a claim (P3's 'the very next day') becomes an exact-quote requirement. Both err
+   toward `insufficient_evidence`.
+4. In grounding mode (model summaries, no page text), an attribution needs quotations in two
+   independent summaries, so more claims about what was said end as `insufficient_evidence`
+   there.
+5. Not measured live: no model call was made. Whether Gemini's analysis reliably fills
+   `attributed_to`/`exact_words` is untested; the deterministic verb and quotation detection
+   does not depend on it.
 
 ## 8. Remaining steps
 
