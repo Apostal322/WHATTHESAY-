@@ -514,3 +514,55 @@ def test_capture_script_parses_a_saved_page_into_the_fixture(tmp_path: Path) -> 
     assert cap["method"] == "user_saved_html" and cap["environment"] == "pytest"
     assert cap["excerpts"][0]["text"].startswith("SYNTHETIC")
     assert all(s["capture"] is None for s in data["sources"] if s["id"] != "U3")
+
+
+def test_quoting_the_claim_under_review_gets_an_accurate_note() -> None:
+    claim = "AI has already replaced 80% of software engineers."
+    notes = check_quotations(
+        'The claim that "AI has already replaced 80% of software engineers" is not supported [S1].',
+        [_src("S1", T_NEWS)],
+        (claim,),
+    )
+    assert len(notes) == 1
+    assert "wording of the claim being checked" in notes[0]
+    assert "not a direct quotation of the speaker" in notes[0]
+    assert "paraphrase or an interpretation" not in notes[0]
+
+
+async def test_redirected_capture_is_credited_to_the_site_actually_read() -> None:
+    from app.evaluation.fixture import FixtureRetriever
+
+    cap = capture_from_paragraphs(
+        [T_WIRE],
+        ["vote against"],
+        final_url="https://www.wire-mirror.example.com/story",
+        method="app_fetch_page",
+        environment="pytest synthetic",
+        now=datetime(2026, 10, 14, tzinfo=UTC),
+    )
+    fx = EvidenceFixture.model_validate(
+        {
+            "kind": "offline_regression_fixture",
+            "live_retrieval": False,
+            "case_id": "synthetic",
+            "description": "SYNTHETIC",
+            "excerpt_policy": "test",
+            "sources": [
+                {
+                    "id": "U2",
+                    "url": "https://short.example.net/r",
+                    "publisher": "SYNTHETIC",
+                    "source_type": "wire_report",
+                    "located_by": "user",
+                    "relevant_to": ["P2"],
+                    "anchors": ["vote against"],
+                    "capture": cap.model_dump(),
+                }
+            ],
+        }
+    )
+    res = await FixtureRetriever(fx).retrieve(
+        claim="c", queries=[], scope_notes=None, language="en"
+    )
+    assert res.sources[0].url == "https://www.wire-mirror.example.com/story"
+    assert res.sources[0].domain == "wire-mirror.example.com"

@@ -16,6 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
+      - run: python ../scripts/scan_secrets.py
       - run: ruff check . ../scripts
       - run: ruff format --check . ../scripts
       - run: mypy app

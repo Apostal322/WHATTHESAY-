@@ -57,3 +57,4 @@ ignore_missing_imports = true
 "../scripts/live_validation.py" = ["E402", "E501"]  # markdown table templates
 "../scripts/compare_retrieval.py" = ["E402", "E501"]  # markdown table templates
 "../scripts/verify_claim.py" = ["E402", "E501"]  # markdown table templates
+"../scripts/scan_secrets.py" = ["E501"]  # regex patterns

@@ -3,8 +3,8 @@ from app.core.logging import redact_secrets
 
 def test_redacts_google_keys_tokens_and_query_params() -> None:
     text = (
-        "key AIzaSyA1234567890abcdefghijklmnopqrstu, auth AQ.FAKEfakeFAKEfakeFAKEfake0000, "
-        "Bearer ya29.a0AfH6SMBabcdefghijklmnopqrstuvwxyz, url https://x.test/v1?key=abc123&alt=json"
+        "key AIzaSyA1234567890abcdefghijklmnopqrstu, auth AQ.FAKEfakeFAKEfakeFAKEfake0000, "  # secret-scan: allow (fake)
+        "Bearer ya29.a0AfH6SMBabcdefghijklmnopqrstuvwxyz, url https://x.test/v1?key=abc123&alt=json"  # secret-scan: allow (fake)
     )
     out = redact_secrets(text)
     for secret in ("AIzaSyA123", "AQ.FAKEfake", "ya29.a0AfH6", "abc123"):

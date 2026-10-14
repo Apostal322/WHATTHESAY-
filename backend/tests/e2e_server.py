@@ -110,7 +110,7 @@ class ScriptedLLM:
 
 def main() -> None:
     settings = Settings(
-        GEMINI_API_KEY="e2e-fixture-not-a-real-key",
+        GEMINI_API_KEY="e2e-fixture-not-a-real-key",  # secret-scan: allow (fake)
         YOUVERIFY_RESOLVE_REDIRECTS=False,
         YOUVERIFY_CACHE_TTL_SEC=0,
         _env_file=None,  # type: ignore[call-arg]

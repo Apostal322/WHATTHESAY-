@@ -54,10 +54,19 @@ Prefer a **session-only** variable, which is never written to disk and disappear
 closes:
 
 ```powershell
-$env:GEMINI_API_KEY = Read-Host "Gemini API key" -MaskInput   # PowerShell 7; on 5.1 paste after = "..."
+# Works in Windows PowerShell 5.1 and PowerShell 7: the key is typed masked and never echoed.
+$sec = Read-Host "Gemini API key" -AsSecureString
+$env:GEMINI_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
+    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+Remove-Variable sec
 $env:YOUVERIFY_GEMINI_DAILY_CALL_LIMIT = "20"                 # hard cap per backend process
 $env:YOUVERIFY_MAX_RETRIES = "0"                              # one request per call, no silent retries
 ```
+
+Do **not** type `$env:GEMINI_API_KEY = "..."` with the key in it: PowerShell's command history
+(PSReadLine) saves every typed line in plain text to
+`%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`. If that has
+happened, delete the line from that file and rotate the key.
 
 Or keep it in `.env` (git-ignored: check with `git check-ignore -v .env`, which must print a match):
 
@@ -67,7 +76,12 @@ notepad .env        # GEMINI_API_KEY=..., YOUVERIFY_GEMINI_DAILY_CALL_LIMIT=20, 
 ```
 
 Never paste the key into the extension, a commit, an issue or a chat. Before committing anything:
-`git status` must not list `.env`, and `git diff --cached | Select-String "AIza"` must print nothing.
+`git status` must not list `.env`, and the secret scan must report 0 findings (it recognises both
+`AIza…` and `AQ.…` Google key formats and never prints a key):
+
+```powershell
+backend\.venv\Scripts\python scripts\scan_secrets.py --staged
+```
 
 Check which models the key can use (1 list request, not a generation):
 

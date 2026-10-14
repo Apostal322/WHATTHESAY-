@@ -180,7 +180,7 @@ def _quota_body(quota_id: str, retry_delay: str, message: str) -> dict[str, Any]
 
 
 async def test_daily_quota_is_not_retryable_and_carries_sanitized_diagnostics() -> None:
-    leaked = "AIzaSyA1234567890abcdefghijklmnopqrstu"
+    leaked = "AIzaSyA1234567890abcdefghijklmnopqrstu"  # secret-scan: allow (fake)
 
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(

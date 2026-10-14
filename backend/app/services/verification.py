@@ -105,7 +105,9 @@ def _fold_quote(text: str) -> str:
     return text.strip(" .,;:!?'\"")
 
 
-def check_quotations(text: str, cited: list[EvidenceSource]) -> list[str]:
+def check_quotations(
+    text: str, cited: list[EvidenceSource], claim_texts: tuple[str, ...] = ()
+) -> list[str]:
     """Quoted words in model text must occur verbatim in the page text of the cited sources.
 
     Model explanations often put an outlet's paraphrase, a headline's framing or the claim's
@@ -114,6 +116,7 @@ def check_quotations(text: str, cited: list[EvidenceSource]) -> list[str]:
     an author's interpretation is not mistaken for what was said.
     """
     notes: list[str] = []
+    claims = [_fold_quote(c) for c in claim_texts if c]
     for match in _QUOTED_RE.finditer(text):
         quoted = _fold_quote(match.group(1))
         if len(quoted.split()) < _MIN_QUOTED_WORDS:
@@ -131,6 +134,14 @@ def check_quotations(text: str, cited: list[EvidenceSource]) -> list[str]:
             notes.append(
                 f"Quoted words \u201c{shown}\u201d appear only in a search snippet or model "
                 f"summary ({', '.join(elsewhere)}), not in verbatim page text."
+            )
+        elif any(quoted in c for c in claims):
+            # Quoting the claim under review is normal; say so instead of calling it a
+            # paraphrase, but still make clear it is not a quotation of the person.
+            notes.append(
+                f"Quoted words \u201c{shown}\u201d are the wording of the claim being checked; "
+                "the cited sources do not contain them verbatim, so they are not a direct "
+                "quotation of the speaker."
             )
         else:
             notes.append(
@@ -379,7 +390,9 @@ class VerificationService:
             text = clip(strip_unknown_citations(f.text, set(by_id)), 500)
             if ids and text:  # an uncited finding is not evidence
                 findings.append(KeyFinding(text=text, stance=f.stance, source_ids=ids))
-                quote_notes += check_quotations(text, [by_id[sid] for sid in ids])
+                quote_notes += check_quotations(
+                    text, [by_id[sid] for sid in ids], (req.claim, normalized)
+                )
         if misaligned:
             notes.append(
                 f"Removed {misaligned} citation(s) from key findings: the cited source was not "
@@ -398,7 +411,9 @@ class VerificationService:
 
         explanation = clip(strip_unknown_citations(evaluation.explanation, set(by_id)), 1200) or ""
         cited_in_explanation = [by_id[c] for c in dict.fromkeys(_CITATION_RE.findall(explanation))]
-        quote_notes += check_quotations(explanation, cited_in_explanation or sources)
+        quote_notes += check_quotations(
+            explanation, cited_in_explanation or sources, (req.claim, normalized)
+        )
         notes += list(dict.fromkeys(quote_notes))
         if verdict != evaluation.verdict:
             explanation = (

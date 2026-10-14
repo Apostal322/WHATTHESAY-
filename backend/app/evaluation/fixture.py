@@ -202,7 +202,8 @@ class FixtureRetriever:
                 id=f"S{i}",
                 url=s.capture.final_url if s.capture else s.url,
                 title=f"{s.publisher} ({s.source_type.replace('_', ' ')})",
-                domain=normalize_domain(s.url),
+                # The page actually read decides the site (a capture may have been redirected).
+                domain=normalize_domain(s.capture.final_url if s.capture else s.url),
                 excerpts=[e.text for e in s.capture.excerpts] if s.capture else [],
                 origin="page_text",
             )

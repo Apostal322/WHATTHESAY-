@@ -447,6 +447,30 @@ the [Windows guide](windows-local-validation.md): `--check-only` → capture →
 gemini --max-calls 10` (live evaluation of offline evidence) → a manual-claim run with live retrieval
 (`verify_claim.py`; grounding needs quota, or use the Brave search backend).
 
+## 7f. Audit of the fixture work (2026-10-14, later session)
+
+A parallel session had already pushed `c2472dc`: provenance categories, the offline fixture (all
+sources `pending_capture`), capture and per-proposition scripts, the quotation guard, the
+chronology check and the Windows guide. This session audited it and fixed what it found, with
+**no model calls**:
+
+| Finding | Fix | Test |
+|---|---|---|
+| The quotation guard told users that quoting the **claim under review** was "a paraphrase or an interpretation", which is noise on most results | Quotes that match the claim's own wording get an accurate note ("the wording of the claim being checked … not a direct quotation of the speaker"); other unverified quotes are flagged as before | `test_quoting_the_claim_under_review_gets_an_accurate_note` |
+| `FixtureRetriever` took a source's domain from the original URL even when the capture followed a redirect, so citations and independence grouping credited the wrong site | Domain from the captured `final_url` | `test_redirected_capture_is_credited_to_the_site_actually_read` |
+| Windows guide: on PowerShell 5.1 it said to paste the key after `=`, which PSReadLine saves in plain text to `ConsoleHost_history.txt`. Its pre-commit check matched only `AIza…`, not the `AQ.…` key format in use | Masked `Read-Host -AsSecureString` for 5.1 and 7, a warning about the history file, and `scripts/scan_secrets.py --staged` | `test_scan_secrets.py` |
+| No automated secret scan (ad-hoc greps before each commit) | `scripts/scan_secrets.py`: tracked files (now a CI step) or staged additions; Google key formats, OAuth tokens, private keys, non-empty secret assignments, tracked `.env`; redacted output; `secret-scan: allow` marks deliberate test fakes. Verified to catch the real key format on the git-ignored `.env` (count only, nothing printed) | 11 tests, including a staged-mode run in a throwaway repository and "the repository itself is clean" |
+
+**Network re-check (`scripts/capture_evidence.py --check-only`):** every source host, YouTube and
+Brave fail DNS from this environment; only the Gemini API host resolves. The fixture therefore
+remains `pending_capture`: no excerpt exists, and none was written by hand.
+
+**Known gap, not fixed:** the quotation guard is advisory. In the P4 regression test, an evaluator
+that treats CBS's "vote to uphold" framing as Trump's words still yields a confident `supported`.
+The scorer counts that as a false confident verdict and the response carries a guardrail note, but
+the verdict is not changed. A deterministic override would need a reliable attribution check, which
+is not built.
+
 ## 8. Remaining steps
 
 0. On a networked machine: capture the debate fixture and run it proposition by proposition (§7e,

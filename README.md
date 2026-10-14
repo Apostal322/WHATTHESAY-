@@ -77,7 +77,7 @@ given). Last updated 2026-10-14.
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | Verified with mocks: 259 backend tests (ruff, format, mypy clean) |
+| Backend API, pipeline, guardrails, error handling | Verified with mocks: 273 backend tests (ruff, format, mypy clean) |
 | Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 39 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
 | Video claim extraction (Gemini, clipped YouTube window) | **Verified live**: 4/6 cases on `gemini-3.8-flash` (2026-10-13) and 1 case on `gemini-3.6-flash` (2026-10-14, 9.7 s). Extractions are **unlabelled**: no accuracy is claimed, and the model's "exact quote" flag and speaker are unverified |
 | Clip offsets reduce processed video | **Verified live** on `gemini-3.8-flash`: media tokens scaled 2.50× for a 2.50× window in 3/3 paired runs |
@@ -239,9 +239,10 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 
 ```bash
 # backend (from backend/)
-pytest                    # 259 tests, no network, no key
+pytest                    # 273 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
+python ../scripts/scan_secrets.py            # tracked files (CI); add --staged before a commit
 
 # extension (from extension/)
 npm test                  # vitest + Testing Library (39 tests)
