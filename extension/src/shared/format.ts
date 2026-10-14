@@ -69,6 +69,7 @@ export const STANCE_LABEL: Record<Stance, string> = {
   supports: "Supports",
   contradicts: "Contradicts",
   partially_supports: "Partly supports",
+  unclear: "Unclear",
   irrelevant: "Not relevant",
 };
 

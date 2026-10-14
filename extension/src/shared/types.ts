@@ -2,7 +2,7 @@
 
 export type ClaimType = "factual" | "prediction" | "opinion" | "ambiguous" | "non_verifiable";
 export type Verdict = "supported" | "contradicted" | "mixed" | "insufficient_evidence" | "not_verifiable";
-export type Stance = "supports" | "contradicts" | "partially_supports" | "irrelevant";
+export type Stance = "supports" | "contradicts" | "partially_supports" | "unclear" | "irrelevant";
 export type Language = "auto" | "en" | "ru";
 export type VerifyStage = "analyzing" | "searching" | "evaluating";
 

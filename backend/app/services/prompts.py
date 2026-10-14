@@ -152,6 +152,6 @@ Sources:
 {sources_block}
 
 Return:
-- source_assessments: one per source id: supports | contradicts | partially_supports | irrelevant, with a one-sentence note.
+- source_assessments: one per source id: supports | contradicts | partially_supports | unclear | irrelevant, with a one-sentence note. Use unclear when the source is about the claim but its excerpts neither clearly support nor contradict it; do not force such a source into another stance. Keep sources that contradict your conclusion; do not drop them.
 - verdict, explanation (2-4 sentences with [S#] citations), key_findings (each tied to source ids), limitations.
 {output_language_instruction(language)}"""

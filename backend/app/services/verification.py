@@ -98,6 +98,7 @@ _COMPATIBLE: dict[Stance, set[Stance]] = {
     "supports": {"supports", "partially_supports"},
     "contradicts": {"contradicts", "partially_supports"},
     "partially_supports": {"supports", "partially_supports", "contradicts"},
+    "unclear": set(),
     "irrelevant": set(),
 }
 
@@ -111,8 +112,13 @@ def _same_origin(sources: list[EvidenceSource]) -> dict[str, list[str]]:
 
 
 def independent_domains(stances: dict[str, Stance], sources: dict[str, EvidenceSource]) -> int:
-    """Independent origins among relevant sources: sites and republished copies count once."""
-    used = {sid for sid, st in stances.items() if st != "irrelevant"}
+    """Independent origins among sources that bear on the claim (support, contradict or partly
+    support it); sites and republished copies count once. `unclear` sources do not count."""
+    used = {
+        sid
+        for sid, st in stances.items()
+        if st in ("supports", "contradicts", "partially_supports")
+    }
     groups = origin_groups(list(sources.values()))
     return len({groups[sid] for sid in used})
 
@@ -314,7 +320,14 @@ class VerificationService:
             ).strip()
 
         # Show sources that were assessed as relevant first; irrelevant last.
-        order = {"supports": 0, "contradicts": 0, "partially_supports": 1, None: 2, "irrelevant": 3}
+        order = {
+            "supports": 0,
+            "contradicts": 0,
+            "partially_supports": 1,
+            "unclear": 2,
+            None: 2,
+            "irrelevant": 3,
+        }
         refs = [
             SourceRef(
                 id=src.id,

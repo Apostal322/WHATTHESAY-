@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 ClaimType = Literal["factual", "prediction", "opinion", "ambiguous", "non_verifiable"]
 Verdict = Literal["supported", "contradicted", "mixed", "insufficient_evidence", "not_verifiable"]
-Stance = Literal["supports", "contradicts", "partially_supports", "irrelevant"]
+Stance = Literal["supports", "contradicts", "partially_supports", "unclear", "irrelevant"]
 Language = Literal["auto", "en", "ru"]
 
 MAX_TIMESTAMP_SEC = 12 * 60 * 60  # 12h: longer than any standard (non-live) upload we target

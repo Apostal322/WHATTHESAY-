@@ -503,3 +503,31 @@ async def test_models_used_records_each_step(settings: Settings) -> None:
         "retrieval": "gemini-3.6-flash",
         "evaluation": "gemini-3.6-flash",
     }
+
+
+async def test_unclear_sources_back_no_verdict_and_are_not_independent_evidence(
+    settings: Settings,
+) -> None:
+    llm = FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS_FACTUAL,
+            "EvaluationOutput": {
+                "source_assessments": [
+                    {"source_id": "S1", "stance": "unclear", "note": "On topic, inconclusive."},
+                    {"source_id": "S2", "stance": "unclear", "note": "Same."},
+                ],
+                "verdict": "contradicted",
+                "explanation": "Probably false [S1].",
+                "key_findings": [
+                    {"text": "Growth [S1].", "stance": "contradicts", "source_ids": ["S1"]}
+                ],
+                "limitations": [],
+            },
+        },
+        grounded=GROUNDED,
+    )
+    resp = await _service(llm, settings).verify(VerifyRequest(claim=CLAIM))
+    assert resp.verdict == "insufficient_evidence"
+    assert resp.independent_source_count == 0
+    assert resp.key_findings == []
+    assert {s.id: s.stance for s in resp.sources}["S1"] == "unclear"
