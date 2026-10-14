@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Tried once per call, only when the configured model is overloaded (HTTP 503).
     # Unset = no fallback. Responses record which model actually served each step.
     fallback_model: str | None = Field(default=None, alias="YOUVERIFY_FALLBACK_MODEL")
+    # Daily cap on Gemini requests per backend process (00:00 UTC reset); unset = no cap.
+    # Per process: with N workers the effective cap is N x this value.
+    gemini_daily_call_limit: int | None = Field(
+        default=None, ge=1, alias="YOUVERIFY_GEMINI_DAILY_CALL_LIMIT"
+    )
 
     # --- Video window ---------------------------------------------------------
     # The user usually clicks *after* hearing the statement, so the window is

@@ -30,6 +30,7 @@ from app.core.errors import (
     VideoUnavailableError,
 )
 from app.core.logging import redact_secrets
+from app.services.search import SpendGuard
 
 log = logging.getLogger(__name__)
 
@@ -201,12 +202,16 @@ class GeminiClient:
         max_retries: int,
         transport: httpx.AsyncBaseTransport | None = None,
         fallback_model: str | None = None,
+        daily_call_limit: int | None = None,
     ) -> None:
         # A missing key is reported on first use, so input validation errors surface first
         # and the server can start (and serve /health) without credentials.
         self._has_key = bool(api_key)
         # Used once per call, only when the requested model is overloaded (HTTP 503).
         self._fallback_model = fallback_model
+        # Daily cap on model requests sent by this process (each fallback attempt counts;
+        # SDK-internal retries are bounded by max_retries). Resets 00:00 UTC.
+        self._call_budget = SpendGuard(daily_call_limit) if daily_call_limit else None
         self._timeout_sec = timeout_sec
         self._client = genai.Client(
             api_key=api_key or "missing",
@@ -239,6 +244,12 @@ class GeminiClient:
         if not self._has_key:
             raise MissingCredentialsError(
                 "GEMINI_API_KEY is not set on the backend. Add it to .env and restart."
+            )
+        if self._call_budget is not None and not self._call_budget.try_reserve(1):
+            log.warning("model_call_cap_reached", extra={"operation": operation, "model": model})
+            raise ProviderQuotaExhaustedError(
+                "The service's daily AI capacity has been reached. Try again tomorrow.",
+                diagnostics={"operation": operation, "model": model, "reason": "daily_call_cap"},
             )
         try:
             # Outer guard: the SDK timeout is per attempt; retries can multiply it.

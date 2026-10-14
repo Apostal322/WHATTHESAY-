@@ -52,6 +52,7 @@ class AppState:
                 timeout_sec=self.settings.request_timeout_sec,
                 max_retries=self.settings.max_retries,
                 fallback_model=self.settings.fallback_model,
+                daily_call_limit=self.settings.gemini_daily_call_limit,
             )
         return self.llm
 

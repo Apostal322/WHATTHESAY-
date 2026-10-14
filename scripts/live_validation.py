@@ -537,6 +537,7 @@ def main() -> int:
         timeout_sec=settings.request_timeout_sec,
         max_retries=settings.max_retries,
         fallback_model=settings.fallback_model,
+        daily_call_limit=settings.gemini_daily_call_limit,
     )
     results = asyncio.run(run_all(cases, llm, settings, args))
 

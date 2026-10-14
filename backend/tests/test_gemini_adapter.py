@@ -318,3 +318,26 @@ async def test_bare_429_without_quota_wording_stays_a_retryable_rate_limit() -> 
 
     with pytest.raises(ProviderRateLimitedError):
         await _client(handler).grounded_search(model="m", system="s", prompt="p")
+
+
+async def test_daily_call_cap_blocks_before_any_request_and_counts_fallback_attempts() -> None:
+    handler = _overloaded_unless("gemini-3.6-flash")
+    client = GeminiClient(
+        "test-key",
+        timeout_sec=5,
+        max_retries=0,
+        transport=httpx.MockTransport(handler),
+        fallback_model="gemini-3.6-flash",
+        daily_call_limit=3,
+    )
+    # 3.8 overloaded (1 call) -> 3.6 succeeds (1 call): 2 of 3 used.
+    await client.generate_json(
+        model="gemini-3.8-flash", system="s", prompt="p", schema=ExtractionOutput
+    )
+    # Third call allowed (3.8 fails), its fallback would be the 4th: refused without a request.
+    with pytest.raises(ProviderQuotaExhaustedError) as info:
+        await client.generate_json(
+            model="gemini-3.8-flash", system="s", prompt="p", schema=ExtractionOutput
+        )
+    assert (info.value.diagnostics or {})["reason"] == "daily_call_cap"
+    assert len(handler.seen) == 3
