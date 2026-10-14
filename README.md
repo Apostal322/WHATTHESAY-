@@ -10,6 +10,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-React%2019-3178C6?logo=typescript&logoColor=white)
 ![Chrome MV3](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?logo=googlechrome&logoColor=white)
 ![Gemini](https://img.shields.io/badge/LLM-Google%20Gemini-8E75B2?logo=googlegemini&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Status](https://img.shields.io/badge/status-research%20prototype-orange)
 
 </div>
@@ -27,9 +28,9 @@ overrule the model when the retrieved evidence does not justify its confidence.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/images/demo-1-confirm.png" width="250" alt="Claim extracted from the video, shown for confirmation"></td>
-    <td align="center"><img src="docs/images/demo-2-safeguard.png" width="250" alt="Attribution safeguard overriding a model verdict"></td>
-    <td align="center"><img src="docs/images/demo-3-supported.png" width="250" alt="Supported verdict with two independent sources"></td>
+    <td align="center"><img src="docs/images/demo-1-confirm.png" width="250" alt="Simulated demo (synthetic data): claim extracted from the video, shown for confirmation"></td>
+    <td align="center"><img src="docs/images/demo-2-safeguard.png" width="250" alt="Simulated demo (synthetic data): attribution safeguard overriding a model verdict"></td>
+    <td align="center"><img src="docs/images/demo-3-supported.png" width="250" alt="Simulated demo (synthetic data): supported verdict with two independent sources"></td>
   </tr>
   <tr>
     <td align="center"><b>1. Confirm the claim</b><br><sub>extracted near 12:35, editable</sub></td>
@@ -39,7 +40,7 @@ overrule the model when the retrieved evidence does not justify its confidence.
 </table>
 
 > [!NOTE]
-> **These screenshots use synthetic demo data.** They show the real built extension and the real
+> **These screenshots are simulated demonstrations with synthetic data, not real fact-checks.** They show the real built extension and the real
 > backend (API, streaming, guardrails), but the model's answers come from a scripted fake model
 > ([`backend/tests/demo_server.py`](backend/tests/demo_server.py)). The town, the mayor and the
 > `example.*` sources are invented, and every model-written line is tagged `[DEMO]`. In image 2,
@@ -402,4 +403,4 @@ docs/           architecture, API, development, evaluation, security, validation
 
 ## License
 
-No license has been chosen yet. Until one is added, default copyright applies and the code is not licensed for reuse.
+Released under the [MIT License](LICENSE).
