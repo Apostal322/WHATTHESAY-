@@ -44,6 +44,9 @@ OUT_DIR = REPO / "eval" / "factchecks"
 def load_input(args: argparse.Namespace) -> dict[str, Any]:
     if args.from_run:
         data = json.loads(Path(args.from_run).read_text(encoding="utf-8"))
+        if "input_method" in data:  # a committed fact-check artifact: reuse its input as is
+            keys = ("id", "input_method", "claim", "context", "language", "video", "extraction")
+            return {k: data.get(k) for k in keys}
         row = next(r for r in data["results"] if r["case"]["id"] == args.case)
         ext = row.get("extraction") or {}
         if ext.get("status") != "success" or not ext.get("claim"):
@@ -141,11 +144,19 @@ def render_markdown(a: dict[str, Any]) -> str:
         ]
     lines += ["", "## Result"]
     if "error" in v:
+        diag = dict(v.get("diagnostics") or {})
+        done = diag.pop("completed", None)
         lines += [
             f"**No verdict: {v['error']}** ({v.get('message')})",
             "",
-            f"Diagnostics: `{json.dumps(v.get('diagnostics'))}`",
+            f"Diagnostics: `{json.dumps(diag, ensure_ascii=False)}`",
         ]
+        if done:
+            lines += [
+                "",
+                "Completed before the failure (model output, unreviewed):",
+                f"```json\n{json.dumps(done, indent=2, ensure_ascii=False)}\n```",
+            ]
     else:
         lines += [
             f"- Verdict: **{v.get('verdict')}** · claim type: {v.get('claim_type')}",
@@ -220,7 +231,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--from-run", help="results.json of a live_validation run")
+    ap.add_argument(
+        "--from-run",
+        help="results.json of a live_validation run, or an eval/factchecks/*.json artifact",
+    )
     ap.add_argument("--case", help="case id inside --from-run")
     ap.add_argument("--claim", help="manual claim text")
     ap.add_argument("--context", help="manual context (speaker, date, event)")

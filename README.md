@@ -21,6 +21,7 @@ settle the claim, it says so.
 - [Testing the full user flow](#testing-the-full-user-flow)
 - [API](#api)
 - [Development](#development)
+- [Diagnosing provider errors](#diagnosing-provider-errors)
 - [Known limitations](#known-limitations)
 - [Future ML improvements](#future-ml-improvements)
 - Docs: [live validation report](docs/live-validation-report.md) · [evidence retrieval architecture](docs/retrieval-architecture.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
@@ -70,17 +71,23 @@ No numerical confidence is shown, because model self-reported confidence is not 
 
 ## Project status
 
+Status words: **verified live** (ran against the real provider), **verified with mocks** (automated
+tests with fake providers or fixture pages), **implemented, not tested live**, **blocked** (reason
+given). Last updated 2026-10-14.
+
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | ✅ Implemented; 199 unit/integration tests with a fake LLM |
-| Gemini request wire format (YouTube clip, schema, search tool) and response parsing | ✅ Verified against a mocked HTTP transport using the real SDK (google-genai 2.29) and audited against current docs ([report](docs/live-validation-report.md)) |
-| Chrome extension (MV3, side panel, content script, background) | ✅ Implemented; 39 component/unit tests; builds to `extension/dist` |
-| End-to-end UI ↔ backend in a real Chromium | ✅ Automated smoke test (`npm run e2e`). Uses a **fixture YouTube page** and a **scripted fake model** |
-| **Live Gemini extraction and clipping** | ⚠️ **Partly run** (2026-10-13, `gemini-3.8-flash`): extraction succeeded on 4/6 exploratory cases; clip offsets honoured in 3/3 paired 20 s/50 s runs. Claims are unlabelled, so no accuracy yet ([report](docs/live-validation-report.md)) |
-| **Live verification** | ⛔ **0/6 completed**: the key's free-tier quota (20 requests/day/model) ran out. Re-run the failed cases with `scripts/live_validation.py --only …` |
-| Evidence retrieval backends | ✅ Brave (recommended for public use), SearXNG and Gemini grounding, independently configurable. Paid search needs a price and a daily cap; paid fallback needs explicit opt-in. Outages return `retrieval_unavailable`, never `insufficient_evidence`. Pages are fetched DNS-pinned, quoted verbatim and grouped by independent origin. ⚠️ **No live comparison yet** (no Brave key; search and publisher sites blocked in the dev sandbox). See [architecture](docs/retrieval-architecture.md) §8 for the shortest path to one real end-to-end fact-check |
-| **Live youtube.com page in Chrome** | ⚠️ **Not yet run** (YouTube blocked in the dev sandbox). Script: `npm run e2e:live` |
-| Accuracy, latency and cost benchmarks | ⚠️ Extraction only: 21–88 s (median 31 s), about $0.005–0.013 per click at assumed prices. Accuracy and verification cost not measured. Public-release decision: **NO-GO** for now ([report](docs/live-validation-report.md) §7) |
+| Backend API, pipeline, guardrails, error handling | Verified with mocks: 213 backend tests (ruff, format, mypy clean) |
+| Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 39 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
+| Video claim extraction (Gemini, clipped YouTube window) | **Verified live**: 4/6 cases on `gemini-3.8-flash` (2026-10-13) and 1 case on `gemini-3.6-flash` (2026-10-14, 9.7 s). Extractions are **unlabelled**: no accuracy is claimed, and the model's "exact quote" flag and speaker are unverified |
+| Clip offsets reduce processed video | **Verified live** on `gemini-3.8-flash`: media tokens scaled 2.50× for a 2.50× window in 3/3 paired runs |
+| Claim analysis (type, queries) | **Verified live** once (`gemini-3.6-flash`, 2026-10-14); output not retained (fixed since: see report §7c) |
+| Grounded verification (verdict with sources) | **Blocked**: no completed live verdict yet. Gemini models returned 503 (overload) intermittently; Google Search grounding returned 429 quota on this free-tier key. See [report](docs/live-validation-report.md) §7c |
+| Brave / SearXNG search, page quoting, citation checks, independence | Verified with mocks. **Blocked live**: no Brave key, and the dev sandbox denies search and publisher sites. See [architecture](docs/retrieval-architecture.md) |
+| Model fallback on 503; per-step model recording | Verified with mocks; fallback **verified live** once (3.8 → 3.6 served the extraction) |
+| Real youtube.com page in Chrome | **Blocked**: YouTube is denied in the dev sandbox. Script: `npm run e2e:live` |
+| Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)) |
+| Public deployment | Not ready: see the public-beta blockers in [security & privacy](docs/security-privacy.md) and report §7 (NO-GO) |
 
 ## Setup (Windows)
 
@@ -259,6 +266,35 @@ scripts/        poc_extract_claim.py, live_validation.py, list_models.py, run_ev
 eval/           dataset.example.jsonl (runs/ is git-ignored)
 docs/           feasibility, evaluation, security & privacy
 ```
+
+## Diagnosing provider errors
+
+Every provider failure is returned with a stable code. The backend logs (JSON) and the evaluation
+artifacts also carry sanitized diagnostics: operation, model, HTTP status, provider status, quota id,
+retry delay and the steps that completed before the failure. Diagnostics are never sent to the
+extension.
+
+| Code | Meaning | What to do |
+|---|---|---|
+| `provider_error` with HTTP 503 in the logs | The Gemini model is overloaded ("high demand") | Wait, or set `YOUVERIFY_FALLBACK_MODEL` (one fallback attempt per call, 503 only) |
+| `provider_quota_exhausted` | The key's quota is used up: daily request cap, or a search-grounding quota | Do not retry in a loop. Wait for the reset (Google documents midnight Pacific for daily quotas) or use a key with more quota |
+| `provider_rate_limited` | A short-window rate limit | Retry after a short wait |
+| `retrieval_unavailable` | No evidence could be retrieved at all (search or page fetch outage). **Not a verdict** | Retry later; check search provider configuration and network |
+| `backend_misconfigured` | e.g. paid search without a price or daily cap | Fix the `.env` settings named in the message |
+| `missing_credentials` | `GEMINI_API_KEY` (or a search key) is not set | Configure it on the backend |
+
+**Checking one claim without the extension (manual-claim mode):**
+
+```bash
+# typed claim (labelled "manual" in the artifact)
+python scripts/verify_claim.py --claim "The Eiffel Tower was completed in 1889." --id eiffel
+# or reuse a saved video extraction, with no new extraction call
+python scripts/verify_claim.py --from-run eval/factchecks/<artifact>.json
+```
+
+This writes `eval/factchecks/<id>-<time>.json` plus a Markdown review sheet. A person fills in the
+review section (quote and speaker checked, sources opened, verdict agrees). In the extension, use
+**Type a claim manually**.
 
 ## Known limitations
 

@@ -286,3 +286,35 @@ async def test_no_fallback_configured_surfaces_the_overload() -> None:
         )
     assert (info.value.diagnostics or {})["http_status"] == 503
     assert len(handler.seen) == 1
+
+
+async def test_quota_message_without_details_is_not_retried_as_a_rate_limit() -> None:
+    # Observed live (2026-10-14) on Google Search grounding: 429 with only a message.
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req.url.path)
+        return httpx.Response(
+            429,
+            json={
+                "error": {
+                    "code": 429,
+                    "status": "RESOURCE_EXHAUSTED",
+                    "message": "You exceeded your current quota, please check your plan and "
+                    "billing details.",
+                }
+            },
+        )
+
+    with pytest.raises(ProviderQuotaExhaustedError) as info:
+        await _fallback_client(handler).grounded_search(model="m", system="s", prompt="p")
+    assert info.value.retryable is False
+    assert len(seen) == 1  # no fallback, no retry
+
+
+async def test_bare_429_without_quota_wording_stays_a_retryable_rate_limit() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, json={"error": {"code": 429, "message": "Too many requests"}})
+
+    with pytest.raises(ProviderRateLimitedError):
+        await _client(handler).grounded_search(model="m", system="s", prompt="p")

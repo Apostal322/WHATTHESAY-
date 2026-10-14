@@ -402,13 +402,19 @@ _QUOTA_EXHAUSTED_MIN_DELAY_SEC = 3600
 
 
 def _is_quota_exhausted(diag: dict[str, Any]) -> bool:
-    if any("perday" in str(v.get("id", "")).lower() for v in diag.get("quota_violations") or []):
+    violations = diag.get("quota_violations") or []
+    if any("perday" in str(v.get("id", "")).lower() for v in violations):
         return True
     delay = str(diag.get("retry_delay", "")).removesuffix("s")
-    try:
-        return float(delay) >= _QUOTA_EXHAUSTED_MIN_DELAY_SEC
-    except ValueError:
-        return False
+    if delay:
+        try:
+            return float(delay) >= _QUOTA_EXHAUSTED_MIN_DELAY_SEC
+        except ValueError:
+            return False
+    # No machine-readable detail (seen live for Google Search grounding): a body that says
+    # the quota is exceeded is treated as exhausted, so nothing retries it in a loop.
+    message = str(diag.get("provider_message", "")).lower()
+    return not violations and "exceeded your current quota" in message
 
 
 def _classify(
@@ -420,8 +426,8 @@ def _classify(
 
     if code == 429 and _is_quota_exhausted(diag):
         return ProviderQuotaExhaustedError(
-            "The Gemini API quota for this key is used up (for example the free-tier daily "
-            "request limit). Try again after it resets, or use a key with a higher quota."
+            "The Gemini API quota for this key has been exceeded (for example a free-tier daily "
+            "or search-grounding limit). Try again later, or use a key with a higher quota."
         )
     if code == 429:
         return ProviderRateLimitedError(

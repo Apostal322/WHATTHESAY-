@@ -288,6 +288,92 @@ python scripts/live_validation.py eval/live_cases.jsonl --only en-debate-1200 \
 
 Alternatively keep 3.8 as primary and set `YOUVERIFY_FALLBACK_MODEL=gemini-3.6-flash`.
 
+## 7c. Second end-to-end attempt (2026-10-14 02:55–03:22 UTC): extraction and analysis live; grounding quota-blocked
+
+**Budget:** at most 10 model calls and $1. **Used:** 8 calls.
+
+| Calls | Breakdown |
+|---|---|
+| Successful generations | 2 (extraction, analysis) |
+| Rejected with 503 | 5 |
+| Rejected with 429 | 1 |
+| Estimated spend on success | about $0.01 at assumed prices |
+
+Gemini 3.6 and 3.8 are reported separately, and none of the §2 (3.8) benchmarks apply to 3.6.
+
+| UTC | Step | Model | Result |
+|---|---|---|---|
+| 02:55:31 | video extraction | gemini-3.8-flash | 503 `UNAVAILABLE` (high demand) |
+| 02:55:31–40 | video extraction | **gemini-3.6-flash** (fallback) | **success**: 9.7 s, 3,576 in / 1,246 out tokens (incl. thinking), ≈ $0.0074 |
+| 02:55:40 | analysis | 3.8 → 3.6 fallback | 503, 503 |
+| 02:56:52 | analysis (`verify_claim.py`, saved extraction) | 3.6 → 3.8 fallback | 503, 503 |
+| 03:22:0x | analysis | **gemini-3.6-flash** | **success** (output not kept: defect D-B below) |
+| 03:22:09 | grounded search | gemini-3.6-flash | **429 `RESOURCE_EXHAUSTED`** "You exceeded your current quota…", with no machine-readable quota detail |
+
+**What the extraction produced** (model output; nothing here is human-verified):
+
+- **Window:** 1155–1210 s of https://www.youtube.com/watch?v=VgsC_aBquUE.
+- **Heard (model transcription, flagged exact by the model, unverified):**
+  > "In your home state of Florida, you surprised many with regard to your six-week abortion ban because
+  > you initially had said that it was too short and you said quote I'm going to be voting that we need
+  > more than six weeks, but then the very next day you reversed course and said you would vote to
+  > support the six-week ban."
+- **Speaker (model inference, unverified):** moderator Linsey Davis, questioning Donald Trump.
+- **Claim (model):** Trump first said Florida's six-week ban was too short and that he would vote for
+  more than six weeks, then the next day said he would vote to support the six-week ban.
+
+**Reviewer notes, to check by hand:**
+
+1. Confirm the wording and speaker against the video or an authentic transcript.
+2. The claim is the moderator's *characterisation*. The checkable facts are what Trump said in late
+   August 2024 about Florida's six-week ban and Amendment 4. "Vote to support the six-week ban" may
+   compress "vote against Amendment 4", so the evaluator should treat wording precision as a scope
+   issue.
+3. Evaluate against what was known in September 2024 (temporal context).
+
+**Result:** no verdict. This is **not** a completed fact-check (not Tier 3).
+
+**Blockers:**
+
+- **Model capacity:** both Flash models return 503 intermittently; about 1 in 3 calls succeeded in this
+  window.
+- **Grounding quota:** Google Search grounding on this key now returns 429 without quota details.
+- **No other retrieval path here:** Brave has no key, and api.search.brave.com and publisher sites are
+  blocked by the sandbox network policy.
+
+**Artifacts:**
+
+- `eval/factchecks/en-debate-1200-20261014T025653Z.{json,md}` (analysis 503s);
+- `eval/factchecks/en-debate-1200-20261014T032209Z.{json,md}` (grounding 429; recorded with the pre-fix
+  code `provider_rate_limited`).
+
+Both carry the full extraction for review.
+
+**Defects found by this run and fixed:**
+
+| # | Defect | Fix | Test |
+|---|---|---|---|
+| D-A | A 429 saying "exceeded your current quota" without `QuotaFailure` detail was classified `provider_rate_limited` ("try again shortly", retryable), inviting futile retries | treated as `provider_quota_exhausted` (non-retryable); a bare 429 without quota wording stays retryable | `test_quota_message_without_details_is_not_retried_as_a_rate_limit`, `test_bare_429_without_quota_wording_stays_a_retryable_rate_limit` |
+| D-B | When verification failed after analysis, the completed analysis (normalized claim, type, planned queries), models and tokens were discarded | error diagnostics (operator-only, never sent to clients) carry `completed`: analysis, retrieval summary, models_used, usage; the review sheet shows it | `test_partial_progress_survives_a_later_failure` |
+
+**To finish Tier 3, one of the following:**
+
+- **(a) Gemini grounding when quota allows:** about 2 calls (grounding and evaluation) plus re-analysis,
+  so 3 calls:
+
+  ```bash
+  YOUVERIFY_VERIFICATION_MODEL=gemini-3.6-flash YOUVERIFY_FALLBACK_MODEL=gemini-3.8-flash YOUVERIFY_MAX_RETRIES=0 \
+  python scripts/verify_claim.py --from-run eval/factchecks/en-debate-1200-20261014T032209Z.json \
+      --price-in 0.75 --price-out 3.75 --price-search-1k 14
+  ```
+
+  This reuses the committed artifact's extraction, so no new extraction call is made.
+- **(b) Brave search mode:** `BRAVE_SEARCH_API_KEY`, network access to api.search.brave.com and
+  publisher sites, a price, and a daily budget. Then 2 Gemini calls (analysis and evaluation) plus 2–4
+  Brave requests, with verbatim page citations.
+
+Then a person fills in the review section of the sheet.
+
 ## 8. Remaining steps
 
 1. Re-run the failed stages (§4 command) on a billed key or after the free-tier reset, then fill in the

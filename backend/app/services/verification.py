@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 import time
@@ -13,6 +14,7 @@ import httpx
 
 from app.core.cache import TTLCache
 from app.core.config import Settings
+from app.core.errors import AppError
 from app.models.llm_outputs import ClaimAnalysisOutput, EvaluationOutput
 from app.models.schemas import (
     ClaimType,
@@ -221,14 +223,41 @@ class VerificationService:
                 guardrail_notes=[],
             )
 
+        def completed_so_far() -> dict[str, object]:
+            """What finished before a failure: kept for review and cost accounting."""
+            return {
+                "analysis": {
+                    "normalized_claim": normalized,
+                    "claim_type": analysis.claim_type,
+                    "planned_queries": queries,
+                    "scope_notes": analysis.scope_notes,
+                },
+                "retrieval": {
+                    "backend": retrieval.backend,
+                    "sources": len(retrieval.sources),
+                    "executed_queries": retrieval.executed_queries,
+                }
+                if retrieval
+                else None,
+                "models_used": dict(models_used),
+                "usage": dataclasses.asdict(usage),
+            }
+
+        def keep_progress(exc: AppError) -> AppError:
+            exc.diagnostics = {**(exc.diagnostics or {}), "completed": completed_so_far()}
+            return exc
+
         # --- Step C: retrieval (grounding or search providers) ----------------
         await progress("searching")
-        retrieval = await self._retriever.retrieve(
-            claim=normalized,
-            queries=queries,
-            scope_notes=analysis.scope_notes,
-            language=req.language,
-        )
+        try:
+            retrieval = await self._retriever.retrieve(
+                claim=normalized,
+                queries=queries,
+                scope_notes=analysis.scope_notes,
+                language=req.language,
+            )
+        except AppError as exc:
+            raise keep_progress(exc) from None
         usage += retrieval.usage
         if retrieval.model:
             models_used["retrieval"] = retrieval.model
@@ -253,21 +282,24 @@ class VerificationService:
 
         # --- Step D/E: evaluation ---------------------------------------------
         await progress("evaluating")
-        res = await self._llm.generate_json(
-            model=model,
-            system=prompts.EVALUATION_SYSTEM,
-            prompt=prompts.evaluation_prompt(
-                claim=normalized,
-                scope_notes=analysis.scope_notes,
-                sources_block=format_sources_for_prompt(sources, _same_origin(sources)),
-                context=req.context,
-                language=req.language,
-            ),
-            schema=EvaluationOutput,
-        )
-        usage += res.usage
-        models_used["evaluation"] = res.model
-        evaluation = parse_model_json(res.text, EvaluationOutput)
+        try:
+            res = await self._llm.generate_json(
+                model=model,
+                system=prompts.EVALUATION_SYSTEM,
+                prompt=prompts.evaluation_prompt(
+                    claim=normalized,
+                    scope_notes=analysis.scope_notes,
+                    sources_block=format_sources_for_prompt(sources, _same_origin(sources)),
+                    context=req.context,
+                    language=req.language,
+                ),
+                schema=EvaluationOutput,
+            )
+            usage += res.usage
+            models_used["evaluation"] = res.model
+            evaluation = parse_model_json(res.text, EvaluationOutput)
+        except AppError as exc:
+            raise keep_progress(exc) from None
 
         # --- Step F: citation integrity + guardrails ---------------------------
         by_id = {src.id: src for src in sources}

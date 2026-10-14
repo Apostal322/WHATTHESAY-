@@ -32,10 +32,27 @@ be used to improve Google's products.
 | Abuse or cost blow-up | Paid search is refused unless a price and a daily USD cap are configured, and spend is reserved before each request (refunded on failure); an automatic paid fallback needs explicit opt-in. Per-IP rate limit (20/min default), 16 KB body limit, length limits on every field, bounded retries and timeouts, result caching. CORS is limited to `chrome-extension://` origins by default; **restrict it to your extension ID** via `YOUVERIFY_ALLOWED_ORIGIN_REGEX`. The server binds to `127.0.0.1`. |
 | Over-broad extension permissions | `sidePanel` only, plus host access to `www.youtube.com` and the local backend. No `tabs`, `scripting`, `storage`, `<all_urls>` or `webRequest`. The content script is read-only and never controls playback. |
 
-## Not in scope for the MVP
+## Public-beta blockers (security and operations)
 
-- Authentication. The backend is meant to run locally for one user. Before any
-  public deployment, add auth (an API token at minimum), TLS, a shared rate-limit store and
-  per-user quotas.
-- Content Security Policy for the backend's own docs pages (`/docs`). They are
-  FastAPI defaults and can be disabled in production.
+These are known, unresolved. Do not deploy a public backend until each is addressed.
+
+| # | Issue | Why it matters | Owner / fix |
+|---|---|---|---|
+| S1 | **No authentication** on `/v1/claims/*` | Anyone who finds the URL can spend the Gemini and search budget. CORS is not an access control: non-browser clients ignore it. | AI engineer: an anonymous per-install token issued by the backend, checked on every call, plus per-token quotas |
+| S2 | **Rate limits and spend caps are in-process** (`SlidingWindowRateLimiter`, `SpendGuard`) | With N workers or instances each has its own counters, so the real limit is N × the configured one. A restart resets them. | DevOps: run one worker, or move the counters to Redis behind the existing interfaces |
+| S3 | **Client IP behind a reverse proxy** | Rate limiting keys on `request.client.host`. Behind a proxy or load balancer every user shares the proxy's IP, so 20 requests/min becomes a *global* limit. | DevOps: start uvicorn with `--proxy-headers --forwarded-allow-ips=<proxy address>` (never `*` on a directly exposed port) |
+| S4 | **No cap on Gemini spend** | Paid *search* has a daily cap; Gemini calls are bounded only by the rate limit. | AI engineer: a daily Gemini budget in the same `SpendGuard` style before public use |
+| S5 | **Egress policy** | `fetch_page` blocks private addresses and pins DNS, but defence in depth needs network-level egress rules. | DevOps: firewall or egress proxy denying private and link-local ranges |
+| S6 | **Exposed credential** | A Gemini key was pasted into a chat on 2026-10-12. It has never been committed, logged or written to reports (scanned), but it must be treated as exposed. | Owner: rotate the key and store the new one as a platform secret |
+| S7 | **Backend `/docs`** | FastAPI's interactive docs are public by default. | DevOps: disable in production (`docs_url=None`) or protect |
+
+Privacy data inventory (what leaves the user's browser):
+
+| Data | Sent to | Retained by YouVerify |
+|---|---|---|
+| YouTube video ID, playback time, duration, language preference | YouVerify backend, then Google (Gemini fetches the public video) | In-memory cache only (TTL 1 h by default); not logged |
+| Claim text (extracted or typed) and video context | YouVerify backend, Gemini, the search provider (as queries) | In-memory cache; not logged |
+| Fetched pages (search mode) | Fetched by the backend from publishers | Not stored beyond the request |
+| IP address | YouVerify backend (rate limiting) | In memory for the rate-limit window |
+
+No accounts, cookies, browsing history or other tabs are collected. Review Google's and Brave's data-use terms for the tier in use.

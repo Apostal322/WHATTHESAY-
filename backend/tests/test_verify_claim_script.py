@@ -115,3 +115,33 @@ async def test_provider_failure_is_recorded_not_turned_into_a_verdict(settings: 
 def test_missing_input_is_rejected() -> None:
     with pytest.raises(SystemExit):
         vc.load_input(_args())
+
+
+async def test_partial_progress_survives_a_later_failure(settings: Settings) -> None:
+    # Reproduces the live run of 2026-10-14: analysis OK, grounding quota-limited.
+    from app.core.errors import ProviderQuotaExhaustedError
+
+    llm = FakeLLM(
+        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL},
+        grounded=ProviderQuotaExhaustedError("quota", diagnostics={"http_status": 429}),
+    )
+    item = vc.load_input(_args(claim="AI replaced 80% of engineers.", id="m"))
+    resp, err, _ = await vc.run(item, settings, llm)
+    assert resp is None and err is not None and err.code == "provider_quota_exhausted"
+    done = (err.diagnostics or {})["completed"]
+    assert done["analysis"]["normalized_claim"] == ANALYSIS_FACTUAL["normalized_claim"]
+    assert done["analysis"]["planned_queries"]
+    assert done["models_used"] == {"analysis": "fake-model"}
+    assert done["usage"]["prompt_tokens"] == 100 and done["retrieval"] is None
+    md = vc.render_markdown(vc.artifact(item, None, err, 1, {}))
+    assert "Completed before the failure" in md and "planned_queries" in md
+
+
+def test_committed_artifact_can_be_reused_without_re_extraction(tmp_path: Path) -> None:
+    run = tmp_path / "results.json"
+    run.write_text(json.dumps(RUN))
+    item = vc.load_input(_args(from_run=str(run), case="en-debate-1200"))
+    art = tmp_path / "artifact.json"
+    art.write_text(json.dumps(vc.artifact(item, None, None, 0, {})))
+    again = vc.load_input(_args(from_run=str(art)))
+    assert again == item
