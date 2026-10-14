@@ -55,6 +55,9 @@ class RetrievalResult:
     search_cost_usd: float | None = None
     empty_reason: str = "No citable sources were retrieved."
     model: str | None = None  # model that served retrieval, when a model was involved
+    # Deterministic statements about where the evidence came from (e.g. an offline fixture);
+    # copied into the response's guardrail notes so the user always sees them.
+    notices: list[str] = field(default_factory=list)
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
 

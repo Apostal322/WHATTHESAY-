@@ -8,6 +8,7 @@ attempts and their status are recorded in docs/live-validation-report.md.
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -110,8 +111,57 @@ def test_unverified_wording_and_unopened_sources_are_labelled_as_such() -> None:
     assert REF.quote_status != "verified_verbatim"
     assert all(not e.opened_by_reviewer for e in REF.evidence)
     user = [e for e in REF.evidence if e.provenance == "user_supplied"]
-    assert len(user) == 4 and all(not e.stances for e in user)  # supplied, never assessed unread
+    assert len(user) == 5 and all(not e.stances for e in user)  # supplied, never assessed unread
     assert not any(e.provenance == "app_retrieved" for e in REF.evidence)
+
+
+def test_located_inspected_approved_and_interpreted_are_kept_apart() -> None:
+    ev = {e.id: e for e in REF.evidence}
+    # externally located by the user: URL and their description only
+    for sid in ("U2", "U3", "U5"):
+        assert ev[sid].located_by == "user" and ev[sid].located_on == "2026-10-14"
+        assert ev[sid].user_statement and ev[sid].stance_basis == "none"
+    assert "15:55" in (ev["U5"].user_statement or "")
+    # nothing has been opened by the application or approved by a person
+    assert not any(e.inspected_by_app or e.app_capture for e in REF.evidence)
+    assert not any(e.human_approved for e in REF.evidence)
+    # every recorded stance is labelled as an AI interpretation of a search summary
+    with_stances = [e for e in REF.evidence if e.stances]
+    assert with_stances and all(
+        e.stance_basis == "ai_interpretation_of_search_summary" for e in with_stances
+    )
+
+
+def test_transcript_time_is_not_mapped_to_the_video() -> None:
+    note = REF.transcript_timestamp_note
+    assert "15:55" in note and "must not be read as" in note
+    assert REF.video_timestamp_sec == 1200
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda r: r["review"].update(status="human_verified"),  # AI cannot self-promote
+        lambda r: r["evidence"][0].update(human_approved=True),
+        lambda r: r["evidence"][0].update(inspected_by_app=True),  # no capture named
+        lambda r: r["evidence"][-1].update(stance_basis="none"),  # stances need a basis
+        lambda r: r["evidence"][-1].update(stance_basis="human_assessment"),
+        lambda r: r["propositions"][2].update(temporal=None),
+    ],
+)
+def test_reference_cannot_be_promoted_or_relabelled_without_the_facts(mutate: Any) -> None:
+    raw = json.loads(REF_PATH.read_text(encoding="utf-8"))
+    mutate(raw)
+    with pytest.raises(ValueError):
+        ReferenceRecord.model_validate(raw)
+
+
+def test_a_human_reviewer_can_verify_the_record() -> None:
+    raw = json.loads(REF_PATH.read_text(encoding="utf-8"))
+    raw["review"].update(reviewer="A. Person", reviewer_kind="human", status="human_verified")
+    raw["evidence"][0].update(human_approved=True)
+    ref = ReferenceRecord.model_validate(raw)
+    assert score_verdict("supported", ref)["counted"] is True
 
 
 def test_criticism_of_the_limit_is_kept_apart_from_the_amendment_vote() -> None:
@@ -119,6 +169,9 @@ def test_criticism_of_the_limit_is_kept_apart_from_the_amendment_vote() -> None:
     assert kinds["P1"] == ("attribution", "supported")  # 'six weeks is too short'
     assert kinds["P2"] == ("attribution", "supported")  # 'voting no' on Amendment 4
     assert kinds["P4"] == ("characterization", "mixed")  # 'vote to support the six-week ban'
+    assert kinds["P5"] == ("legal_effect", "supported")  # what a 'no' vote does in law
+    assert REF.proposition("P5").primary_evidence == ["U3"]  # the official record
+    assert REF.proposition("P3").temporal is not None
 
 
 @pytest.mark.parametrize(

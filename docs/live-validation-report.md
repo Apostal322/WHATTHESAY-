@@ -403,8 +403,54 @@ Then a person fills in the review section of the sheet.
   02:55 extraction and the 03:22 analysis. The same claim then needs 2 calls with Brave or the supplied
   pages (analysis, evaluation), or 3 with grounding.
 
+## 7e. Offline evidence fixture and proposition-level checks (2026-10-14, no API calls)
+
+Repeated Gemini 503 retries had stopped paying off, so this round made **no model calls** and spent no
+credit. Instead it made the debate case testable without live retrieval.
+
+**What the user supplied.** Two previously unreachable references: Roll Call Factbase's timestamped
+debate transcript (statement attributed to Linsey Davis at about 15:55–16:12 of *its* timeline) and the
+Florida Department of State's Amendment 4 record, plus the Reuters report again.
+
+**Could the development environment open them? No (measured).** `curl`: HTTP 000 for all three; fetch
+tool: DNS failure (rollcall.com, constitutionalinitiatives.dos.fl.gov) or refusal (reuters.com). The new
+`scripts/capture_evidence.py --check-only` gives the full picture of the sandbox:
+
+| target | DNS | HTTP |
+|---|---|---|
+| U1–U5 (ABC, Roll Call ×2, Florida DoS, Reuters) | failed | – |
+| www.youtube.com | failed | – |
+| api.search.brave.com | failed | – |
+| generativelanguage.googleapis.com | ok | 404 (reachable; no key sent) |
+
+Web search returned AI-written summaries of syndicated copies, not page text; they were **not** used as
+excerpts.
+
+**Changes.**
+
+| Change | Where | Test |
+|---|---|---|
+| Reference record: U5 (Roll Call transcript) added; U2/U3 re-supplied with `located_on` and the user's description; per-source `source_type`, `located_by`, `inspected_by_app`, `human_approved`, `stance_basis`; dated events E1–E3 and `claim_date`; P5 (legal effect of a "no" vote, primary source U3) split from P4 (characterization). Validators stop an AI reviewer from marking the record human-verified or a source human-approved | `eval/reference/en-debate-1200.*`, `evaluation/reference.py` | `test_case_en_debate_1200.py` |
+| Offline evidence fixture: original URLs, dates, types, anchors, capture metadata (time, method, environment label, page hash), attempt log. All five sources `pending_capture`; no text invented | `eval/fixtures/en-debate-1200/`, `evaluation/fixture.py` | `test_fixture_en_debate_1200.py` |
+| `capture_evidence.py`: the app's own SSRF-guarded fetcher and passage windows cut ≤3 verbatim excerpts of ≤400 chars per source; `--html-file` parses a browser-saved page; `--check-only` measures reachability | `scripts/` | capture tests (synthetic pages) |
+| `FixtureRetriever`: replays captured excerpts as `page_text`, searches nothing, refuses an uncaptured fixture, and adds a notice to every response that the evidence is an offline fixture | `evaluation/fixture.py`, `retrieval.py`, `verification.py` | pipeline tests |
+| Quotation check: quoted words in the explanation or a key finding must occur verbatim in the cited sources' page text; otherwise a guardrail note says to treat them as paraphrase or interpretation (advisory; does not change the verdict) | `verification.py` | quote tests |
+| Chronology: "the very next day" checked from event dates; reported (secondary) dates give `consistent_unconfirmed`, never `consistent`; events after the claim date are separated | `evaluation/chronology.py` | chronology tests |
+| Proposition runner: the normal pipeline once per proposition, scored per proposition (provisional) | `evaluation/propositions.py`, `scripts/run_fixture_case.py` | runner tests |
+
+The new tests use **synthetic** pages (example.org hosts, text marked SYNTHETIC) to drive the real
+capture, retrieval, guardrail and scoring code; they measure no accuracy. Mutation check: disabling the
+quotation check fails 4 of them, and disabling the `contradicted` downgrade fails the proposition test.
+
+**Still blocked.** No captured excerpt, no application verdict, no human sign-off. The shortest path is
+the [Windows guide](windows-local-validation.md): `--check-only` → capture → `run_fixture_case.py --llm
+gemini --max-calls 10` (live evaluation of offline evidence) → a manual-claim run with live retrieval
+(`verify_claim.py`; grounding needs quota, or use the Brave search backend).
+
 ## 8. Remaining steps
 
+0. On a networked machine: capture the debate fixture and run it proposition by proposition (§7e,
+   [Windows guide](windows-local-validation.md) §3, §5, §9).
 1. Re-run the failed stages (§4 command) on a billed key or after the free-tier reset, then fill in the
    source review sheet in `eval/runs/<run>/report.md` by hand.
 2. Label the six moments: watch each, write down the exact words before *t*, and set `verified_by`. Then

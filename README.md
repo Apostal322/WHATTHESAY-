@@ -24,7 +24,7 @@ settle the claim, it says so.
 - [Diagnosing provider errors](#diagnosing-provider-errors)
 - [Known limitations](#known-limitations)
 - [Future ML improvements](#future-ml-improvements)
-- Docs: [live validation report](docs/live-validation-report.md) · [evidence retrieval architecture](docs/retrieval-architecture.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
+- Docs: [Windows local validation](docs/windows-local-validation.md) · [live validation report](docs/live-validation-report.md) · [evidence retrieval architecture](docs/retrieval-architecture.md) · [feasibility report](docs/feasibility.md) · [evaluation protocol](docs/evaluation.md) · [security & privacy](docs/security-privacy.md)
 
 ## How it works
 
@@ -77,7 +77,7 @@ given). Last updated 2026-10-14.
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, guardrails, error handling | Verified with mocks: 229 backend tests (ruff, format, mypy clean) |
+| Backend API, pipeline, guardrails, error handling | Verified with mocks: 259 backend tests (ruff, format, mypy clean) |
 | Chrome extension (MV3 side panel, content script, background) | Verified with mocks: 39 component/unit tests; builds to `extension/dist`. Mocked browser E2E (`npm run e2e`, fixture YouTube page, scripted model) passes |
 | Video claim extraction (Gemini, clipped YouTube window) | **Verified live**: 4/6 cases on `gemini-3.8-flash` (2026-10-13) and 1 case on `gemini-3.6-flash` (2026-10-14, 9.7 s). Extractions are **unlabelled**: no accuracy is claimed, and the model's "exact quote" flag and speaker are unverified |
 | Clip offsets reduce processed video | **Verified live** on `gemini-3.8-flash`: media tokens scaled 2.50× for a 2.50× window in 3/3 paired runs |
@@ -86,10 +86,15 @@ given). Last updated 2026-10-14.
 | Brave / SearXNG search, page quoting, citation checks, independence | Verified with mocks. **Blocked live**: no Brave key, and the dev sandbox denies search and publisher sites. See [architecture](docs/retrieval-architecture.md) |
 | Model fallback on 503; per-step model recording | Verified with mocks; fallback **verified live** once (3.8 → 3.6 served the extraction) |
 | Real youtube.com page in Chrome | **Blocked**: YouTube is denied in the dev sandbox. Script: `npm run e2e:live` |
-| Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)). One AI-reviewed reference record exists (`eval/reference/en-debate-1200`); scores against it are provisional |
+| Accuracy (extraction, verdicts) | **Not measured**: no human-reviewed labels yet ([evaluation protocol](docs/evaluation.md)). One AI-reviewed reference record exists (`eval/reference/en-debate-1200`, five propositions); scores against it are provisional and never reported as accuracy |
+| Offline evidence fixture + proposition-level runs | Implemented and verified with mocks (synthetic pages): capture, offline retriever, quotation check, chronology, per-proposition scoring. The real fixture (`eval/fixtures/en-debate-1200`) has **no captured excerpts yet**: every source host is blocked from the dev sandbox. Capture runs locally: [Windows guide](docs/windows-local-validation.md) §5 |
+| Quoted words vs. sources | Verified with mocks: quotations in the explanation and findings that are not verbatim in cited page text are flagged in `guardrail_notes` |
 | Public deployment | Not ready: see the public-beta blockers in [security & privacy](docs/security-privacy.md) and report §7 (NO-GO) |
 
 ## Setup (Windows)
+
+Full step-by-step guide, including a network reachability check, safe key handling and the
+offline evidence fixture: [docs/windows-local-validation.md](docs/windows-local-validation.md).
 
 **Requirements:** Windows 10/11, [Python 3.11+](https://www.python.org/downloads/),
 [Node.js 22.12+](https://nodejs.org/) (LTS), Google Chrome 116+, and a
@@ -234,12 +239,12 @@ POST /v1/claims/verify/stream   → NDJSON: {"event":"stage","stage":"analyzing|
 
 ```bash
 # backend (from backend/)
-pytest                    # 229 tests, no network, no key
+pytest                    # 259 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 
 # extension (from extension/)
-npm test                  # vitest + Testing Library (35 tests)
+npm test                  # vitest + Testing Library (39 tests)
 npm run typecheck
 npm run build
 npm run e2e               # needs the build + a backend on :8000 (see above)
@@ -254,7 +259,8 @@ backend/app/
   models/       API schemas, model-output schemas
   services/     youtube validation, Gemini adapter, prompts, extraction,
                 verification + guardrails, citation integrity
-  evaluation/   eval dataset schema and metrics
+  evaluation/   eval dataset schema and metrics; reference records, offline evidence
+                fixtures, chronology, proposition-level runs
 backend/tests/  unit, API and adapter tests; e2e_server.py fixture
 extension/src/
   content/      YouTube video context (read-only)
@@ -262,8 +268,10 @@ extension/src/
   sidepanel/    App, hooks, Chrome bridge, styles
   components/   ClaimEditor, VerdictCard, SourceList, …
   shared/       API client, state machine, types, formatting
-scripts/        poc_extract_claim.py, live_validation.py, list_models.py, run_eval.py, make_icons.py
-eval/           dataset.example.jsonl (runs/ is git-ignored)
+scripts/        poc_extract_claim.py, live_validation.py, verify_claim.py, capture_evidence.py,
+                run_fixture_case.py, list_models.py, run_eval.py, make_icons.py
+eval/           dataset.example.jsonl, reference/ (answer keys), fixtures/ (offline evidence),
+                factchecks/ (run artifacts); runs/ is git-ignored
 docs/           feasibility, evaluation, security & privacy
 ```
 
@@ -292,7 +300,19 @@ python scripts/verify_claim.py --claim "The Eiffel Tower was completed in 1889."
 python scripts/verify_claim.py --from-run eval/factchecks/<artifact>.json
 ```
 
-This writes `eval/factchecks/<id>-<time>.json` plus a Markdown review sheet. A person fills in the
+This writes `eval/factchecks/<id>-<time>.json` plus a Markdown review sheet.
+
+**A reference case, proposition by proposition, over offline evidence** (no search; 2 calls per
+proposition; refuses to run until the fixture has captured excerpts):
+
+```bash
+python scripts/capture_evidence.py --check-only     # which hosts this network reaches (no API calls)
+python scripts/capture_evidence.py                  # the app captures short verbatim excerpts
+python scripts/run_fixture_case.py                  # dry run: plan and call count
+python scripts/run_fixture_case.py --llm gemini --max-calls 10
+```
+
+The result is "live evaluation of offline evidence", never a live fact-check. A person fills in the
 review section (quote and speaker checked, sources opened, verdict agrees). In the extension, use
 **Type a claim manually**.
 

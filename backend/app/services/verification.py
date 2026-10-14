@@ -40,6 +40,11 @@ ProgressCallback = Callable[[Stage], Awaitable[None]]
 NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
+# Text between straight or curly double quotes; single quotes are too often apostrophes.
+_DQ = '"\u201c\u201d\u201e'
+_QUOTED_RE = re.compile(f"[{_DQ}]([^{_DQ}]{{3,300}})[{_DQ}]")
+_QUOTE_CHARS = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'})
+_MIN_QUOTED_WORDS = 3
 
 
 async def _noop(_: Stage) -> None:
@@ -93,6 +98,47 @@ def apply_verdict_guardrails(
 def strip_unknown_citations(text: str, known: set[str]) -> str:
     stripped = _CITATION_RE.sub(lambda m: m.group(0) if m.group(1) in known else "", text)
     return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", re.sub(r" {2,}", " ", stripped)).strip()
+
+
+def _fold_quote(text: str) -> str:
+    text = " ".join(text.translate(_QUOTE_CHARS).lower().split())
+    return text.strip(" .,;:!?'\"")
+
+
+def check_quotations(text: str, cited: list[EvidenceSource]) -> list[str]:
+    """Quoted words in model text must occur verbatim in the page text of the cited sources.
+
+    Model explanations often put an outlet's paraphrase, a headline's framing or the claim's
+    own wording in quotation marks, which reads as a direct quotation of the person. This
+    check does not judge meaning; it only says when quoted words are not backed verbatim, so
+    an author's interpretation is not mistaken for what was said.
+    """
+    notes: list[str] = []
+    for match in _QUOTED_RE.finditer(text):
+        quoted = _fold_quote(match.group(1))
+        if len(quoted.split()) < _MIN_QUOTED_WORDS:
+            continue
+        in_page = [
+            s.id
+            for s in cited
+            if s.origin == "page_text" and any(quoted in _fold_quote(e) for e in s.excerpts)
+        ]
+        if in_page:
+            continue
+        elsewhere = [s.id for s in cited if any(quoted in _fold_quote(e) for e in s.excerpts)]
+        shown = clip(match.group(1).strip(), 80)
+        if elsewhere:
+            notes.append(
+                f"Quoted words \u201c{shown}\u201d appear only in a search snippet or model "
+                f"summary ({', '.join(elsewhere)}), not in verbatim page text."
+            )
+        else:
+            notes.append(
+                f"Quoted words \u201c{shown}\u201d were not found verbatim in the cited "
+                "source excerpts: treat them as a paraphrase or an interpretation, not a "
+                "direct quotation."
+            )
+    return notes
 
 
 # Source stances that can back a key finding with the given stance.
@@ -277,7 +323,10 @@ class VerificationService:
                 limitations=[retrieval.empty_reason],
                 search_queries=executed_queries,
                 independent_source_count=0,
-                guardrail_notes=["No verdict was generated without retrieved evidence."],
+                guardrail_notes=[
+                    *retrieval.notices,
+                    "No verdict was generated without retrieved evidence.",
+                ],
             )
 
         # --- Step D/E: evaluation ---------------------------------------------
@@ -303,7 +352,7 @@ class VerificationService:
 
         # --- Step F: citation integrity + guardrails ---------------------------
         by_id = {src.id: src for src in sources}
-        notes: list[str] = []
+        notes: list[str] = list(retrieval.notices)
         stances: dict[str, Stance] = {}
         assessment_notes: dict[str, str | None] = {}
         dropped = 0
@@ -320,6 +369,7 @@ class VerificationService:
         notes += guard_notes
 
         findings: list[KeyFinding] = []
+        quote_notes: list[str] = []
         misaligned = 0
         for f in evaluation.key_findings[:8]:
             known = [sid for sid in f.source_ids if sid in by_id]
@@ -329,6 +379,7 @@ class VerificationService:
             text = clip(strip_unknown_citations(f.text, set(by_id)), 500)
             if ids and text:  # an uncited finding is not evidence
                 findings.append(KeyFinding(text=text, stance=f.stance, source_ids=ids))
+                quote_notes += check_quotations(text, [by_id[sid] for sid in ids])
         if misaligned:
             notes.append(
                 f"Removed {misaligned} citation(s) from key findings: the cited source was not "
@@ -346,6 +397,9 @@ class VerificationService:
             )
 
         explanation = clip(strip_unknown_citations(evaluation.explanation, set(by_id)), 1200) or ""
+        cited_in_explanation = [by_id[c] for c in dict.fromkeys(_CITATION_RE.findall(explanation))]
+        quote_notes += check_quotations(explanation, cited_in_explanation or sources)
+        notes += list(dict.fromkeys(quote_notes))
         if verdict != evaluation.verdict:
             explanation = (
                 "The retrieved evidence does not clearly establish a verdict. " + explanation

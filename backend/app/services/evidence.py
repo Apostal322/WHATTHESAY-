@@ -175,6 +175,9 @@ def _windows(paragraph: str) -> list[str]:
     return out
 
 
+passage_windows = _windows  # public name for offline evidence capture (app.evaluation.fixture)
+
+
 def extract_passages(
     paragraphs: list[str], terms: ClaimTerms, *, max_passages: int = 3, min_relevance: float = 0.2
 ) -> list[str]:

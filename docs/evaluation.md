@@ -70,3 +70,18 @@ python scripts/run_eval.py eval/my_videos.jsonl --verify-from extracted       # 
   set and a held-out split.
 - Re-run after any prompt, model or window change, and keep the run files for
   comparison.
+
+## Reference records, offline fixtures and propositions
+
+Real-world cases get a *reference record* (`eval/reference/<id>.json`): the claim split into
+propositions (attribution, temporal, characterization, legal effect, ...) with a reference verdict
+each, the evidence with its status kept apart (externally located, inspected by the application,
+human-approved, AI interpretation), and dated events for chronology checks. Scores against a record
+are **provisional** until a person sets `review.status: human_verified`; the schema refuses that from
+an AI reviewer.
+
+An *offline evidence fixture* (`eval/fixtures/<id>/fixture.json`) stores short verbatim excerpts that
+the application itself captured (`scripts/capture_evidence.py`) and replays them through the real
+pipeline, one proposition at a time (`scripts/run_fixture_case.py`). Results from it are labelled
+"live evaluation of offline evidence": they test reasoning over a fixed evidence set, never retrieval,
+and are not live fact-checks.
