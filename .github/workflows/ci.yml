@@ -4,6 +4,14 @@ on:
   push:
   pull_request:
 
+# Least privilege: the jobs only read the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -17,6 +25,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
       - run: python ../scripts/scan_secrets.py
+      - run: python ../scripts/check_doc_links.py
       - run: ruff check . ../scripts
       - run: ruff format --check . ../scripts
       - run: mypy app
@@ -38,3 +47,50 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # Known vulnerabilities in the declared runtime dependencies (not the runner's own tools).
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pip-audit
+      - run: pip-audit ./backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm audit --omit=dev --audit-level=high
+        working-directory: extension
+
+  # The built extension in real Chromium against the backend with a scripted fake model
+  # (no API key, no network). Mocked model output: this is not live validation.
+  browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ./backend
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: extension
+      - run: npx playwright-core install --with-deps chromium
+        working-directory: extension
+      - name: Start the fixture backend
+        working-directory: backend
+        run: |
+          python -m tests.e2e_server > ../e2e-server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8000/health && exit 0; sleep 1; done
+          cat ../e2e-server.log; exit 1
+      - name: Smoke test
+        working-directory: extension
+        run: |
+          export CHROMIUM_PATH="$(node -e "import('playwright-core').then(m => console.log(m.chromium.executablePath()))")"
+          npm run e2e
