@@ -99,6 +99,30 @@ try {
   await panel.getByText("Second Video").waitFor({ timeout: 5000 });
   check(true, "SPA navigation picked up");
 
+  // MV3: Chrome may stop the service worker at any time. Stop it, then require the panel to
+  // read the video context again (that request goes through a freshly started worker).
+  const cdp = await context.newCDPSession(panel);
+  const statuses = [];
+  let versionId = null;
+  cdp.on("ServiceWorker.workerVersionUpdated", (e) => {
+    for (const v of e.versions) {
+      statuses.push(v.runningStatus);
+      if (v.runningStatus === "running") versionId = v.versionId;
+    }
+  });
+  await cdp.send("ServiceWorker.enable");
+  for (let i = 0; i < 50 && versionId === null; i++) await new Promise((r) => setTimeout(r, 100));
+  await cdp.send("ServiceWorker.stopWorker", { versionId });
+  for (let i = 0; i < 50 && !statuses.includes("stopped"); i++) await new Promise((r) => setTimeout(r, 100));
+  check(statuses.includes("stopped"), "service worker stopped");
+  await yt.evaluate(() => {
+    history.pushState({}, "", "/watch?v=bbbbbbbbbbb");
+    document.querySelector("h1").textContent = "Third Video";
+    document.dispatchEvent(new Event("yt-navigate-finish"));
+  });
+  await panel.getByText("Third Video").waitFor({ timeout: 8000 });
+  check(true, "video context still served after the service worker was stopped");
+
   console.log("E2E SMOKE PASSED");
 } finally {
   await context.close();

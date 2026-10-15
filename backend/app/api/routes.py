@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
-from typing import Annotated
+from collections.abc import AsyncIterator, Awaitable
+from typing import Annotated, TypeVar
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -16,7 +16,7 @@ from app.api.deps import (
     get_verification_service,
     rate_limit,
 )
-from app.core.errors import AppError
+from app.core.errors import AppError, ClientDisconnectedError
 from app.models.schemas import (
     ErrorResponse,
     ExtractRequest,
@@ -34,6 +34,35 @@ router = APIRouter()
 _ERRORS: dict[int | str, dict[str, object]] = {
     code: {"model": ErrorResponse} for code in (422, 429, 502, 503, 504)
 }
+T = TypeVar("T")
+DISCONNECT_POLL_SEC = 0.5
+
+
+async def cancel_on_disconnect(request: Request, work: Awaitable[T]) -> T:
+    """Run `work`, cancelling it if the client goes away (e.g. the user pressed Cancel).
+
+    Without this a long model call keeps running, and is billed, after nobody can see its
+    result. The streaming endpoint gets the same behaviour from Starlette.
+    """
+    task = asyncio.ensure_future(work)
+
+    async def watch() -> None:
+        while not task.done():
+            if await request.is_disconnected():
+                task.cancel()
+                return
+            await asyncio.sleep(DISCONNECT_POLL_SEC)
+
+    watcher = asyncio.create_task(watch())
+    try:
+        return await task
+    except asyncio.CancelledError:
+        if task.cancelled() and not watcher.cancelled() and watcher.done():
+            log.info("client_disconnected", extra={"path": request.url.path})
+            raise ClientDisconnectedError("The client closed the request.") from None
+        raise
+    finally:
+        watcher.cancel()
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -56,9 +85,11 @@ async def health(request: Request) -> HealthResponse:
     dependencies=[Depends(rate_limit)],
 )
 async def extract_claim(
-    body: ExtractRequest, service: Annotated[ExtractionService, Depends(get_extraction_service)]
+    body: ExtractRequest,
+    request: Request,
+    service: Annotated[ExtractionService, Depends(get_extraction_service)],
 ) -> ExtractResponse:
-    return await service.extract(body)
+    return await cancel_on_disconnect(request, service.extract(body))
 
 
 @router.post(
@@ -69,9 +100,10 @@ async def extract_claim(
 )
 async def verify_claim(
     body: VerifyRequest,
+    request: Request,
     service: Annotated[VerificationService, Depends(get_verification_service)],
 ) -> VerifyResponse:
-    return await service.verify(body)
+    return await cancel_on_disconnect(request, service.verify(body))
 
 
 @router.post(

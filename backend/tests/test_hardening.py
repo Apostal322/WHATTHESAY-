@@ -250,3 +250,162 @@ def test_h7_timestamps_must_be_numbers(client: TestClient, body: dict[str, Any])
 
 def test_h7_app_factory_is_importable_without_side_effects() -> None:
     assert create_app  # imported above; guards against import-time network or key use
+
+
+# ------------------------------------------- H-8: evaluator rules (prompt contract only)
+
+
+def test_h8_evaluator_is_told_the_date_and_mentions_vs_evidence_rules() -> None:
+    """Contract test only: whether the model follows these rules needs live evaluation."""
+    from datetime import date
+
+    from app.services.prompts import EVALUATION_SYSTEM, evaluation_prompt
+
+    prompt = evaluation_prompt(
+        claim="c", scope_notes=None, sources_block="[S1] ...", language="en", today=date(2026, 1, 2)
+    )
+    assert prompt.startswith("Today's date: 2026-01-02.")
+    assert "only mentions, quotes or reports the claim is not support" in EVALUATION_SYSTEM
+    assert "cannot by itself show the statement was false when it was made" in EVALUATION_SYSTEM
+
+
+# ------------------------------------- H-9: cancelled requests stop their model calls
+
+
+class SlowLLM:
+    """Model call that takes `delay` seconds and records whether it was cancelled."""
+
+    def __init__(self, delay: float = 3.0) -> None:
+        self.delay = delay
+        self.started = self.cancelled = self.finished = 0
+
+    async def generate_json(self, *, model: str, schema: Any, **kw: Any) -> Any:
+        import asyncio
+
+        from app.services.llm import LLMResult, Usage
+
+        self.started += 1
+        try:
+            await asyncio.sleep(self.delay)
+        except asyncio.CancelledError:
+            self.cancelled += 1
+            raise
+        self.finished += 1
+        out: dict[str, Any] = (
+            {**ANALYSIS_FACTUAL, "claim_type": "opinion", "is_checkworthy": False}
+            if schema.__name__ == "ClaimAnalysisOutput"
+            else {"found": False, "reason_if_not_found": "none"}
+        )
+        return LLMResult(text=json.dumps(out), usage=Usage(), model=model)
+
+    async def grounded_search(self, **kw: Any) -> Any:
+        raise NotImplementedError
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/v1/claims/extract", {"video_id": "dQw4w9WgXcQ", "timestamp_sec": 10}),
+        ("/v1/claims/verify", {"claim": "The tower opened in 1889."}),
+        ("/v1/claims/verify/stream", {"claim": "The tower opened in 1889."}),
+    ],
+)
+async def test_h9_client_disconnect_cancels_the_model_call(
+    settings: Settings, path: str, body: dict[str, Any]
+) -> None:
+    """Real uvicorn server: the client gives up after 0.3 s; the 3 s model call must stop."""
+    import asyncio
+
+    import uvicorn
+
+    llm = SlowLLM()
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(settings, llm=llm), host="127.0.0.1", port=0, log_level="error")
+    )
+    serving = asyncio.create_task(server.serve())
+    for _ in range(250):  # uvicorn exposes a flag, not an event
+        if server.started:
+            break
+        await asyncio.sleep(0.02)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    try:
+        async with httpx.AsyncClient(timeout=0.3, trust_env=False) as c:
+            with pytest.raises(httpx.TimeoutException):
+                await c.post(f"http://127.0.0.1:{port}{path}", json=body)
+        for _ in range(60):
+            if llm.cancelled:
+                break
+            await asyncio.sleep(0.05)
+        assert (llm.started, llm.cancelled, llm.finished) == (1, 1, 0)
+    finally:
+        server.should_exit = True
+        await serving
+
+
+# ------------------------------------ H-10: identical concurrent requests are coalesced
+
+
+async def test_h10_concurrent_identical_verifications_share_one_model_run(
+    settings: Settings,
+) -> None:
+    import asyncio
+
+    from app.core.singleflight import SingleFlight
+    from app.services.verification import Stage
+
+    llm = FakeLLM(
+        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL, "EvaluationOutput": EVAL_SUPPORTED}
+    )
+    retriever = StaticRetriever()
+    flights: SingleFlight[VerifyResponse, Stage] = SingleFlight()
+    svc = VerificationService(llm, settings, retriever=retriever, flights=flights)
+    stages: list[list[str]] = [[], []]
+
+    def listener(i: int) -> Any:
+        async def on_stage(stage: Stage) -> None:
+            stages[i].append(stage)
+
+        return on_stage
+
+    req = VerifyRequest(claim=CLAIM, context="Senator Jane Doe, 2024.")
+    first, second = await asyncio.gather(svc.verify(req, listener(0)), svc.verify(req, listener(1)))
+    assert retriever.calls == 1 and len(llm.calls) == 2  # one analysis + one evaluation
+    assert first.verdict == second.verdict and second.cached and not first.cached
+    assert stages[0] == ["analyzing", "searching", "evaluating"]
+    assert stages[1] and stages[1][-1] == "evaluating"  # the joiner also sees progress
+    assert flights.in_flight() == 0
+
+
+async def test_h10_shared_work_survives_one_caller_leaving_and_stops_when_all_leave() -> None:
+    import asyncio
+
+    from app.core.singleflight import SingleFlight
+
+    runs: list[str] = []
+
+    async def work(_emit: Any) -> str:
+        runs.append("start")
+        try:
+            await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            runs.append("cancelled")
+            raise
+        runs.append("done")
+        return "result"
+
+    flights: SingleFlight[str, None] = SingleFlight()
+    a = asyncio.create_task(flights.run("k", work))
+    b = asyncio.create_task(flights.run("k", work))
+    await asyncio.sleep(0.05)
+    a.cancel()  # one caller leaves: the other still gets the result
+    assert (await b) == ("result", True)
+    assert runs == ["start", "done"]
+
+    runs.clear()
+    c = asyncio.create_task(flights.run("k2", work))
+    await asyncio.sleep(0.05)
+    c.cancel()  # the only caller leaves: the work stops
+    with pytest.raises(asyncio.CancelledError):
+        await c
+    await asyncio.sleep(0.01)
+    assert runs == ["start", "cancelled"] and flights.in_flight() == 0

@@ -12,6 +12,7 @@ from app.core.cache import TTLCache
 from app.core.config import Settings
 from app.core.errors import ConfigurationError, MissingCredentialsError
 from app.core.rate_limit import SlidingWindowRateLimiter
+from app.core.singleflight import SingleFlight
 from app.models.schemas import ExtractResponse, VerifyResponse
 from app.services.extraction import ExtractionService
 from app.services.llm import GeminiClient, LLMClient
@@ -24,7 +25,7 @@ from app.services.search import (
     SearxngProvider,
     SpendGuard,
 )
-from app.services.verification import VerificationService
+from app.services.verification import Stage, VerificationService
 
 
 @dataclass
@@ -37,6 +38,8 @@ class AppState:
     extract_cache: TTLCache[ExtractResponse] = field(init=False)
     verify_cache: TTLCache[VerifyResponse] = field(init=False)
     search_cache: TTLCache[FailoverOutcome] = field(init=False)
+    extract_flights: SingleFlight[ExtractResponse, None] = field(default_factory=SingleFlight)
+    verify_flights: SingleFlight[VerifyResponse, Stage] = field(default_factory=SingleFlight)
 
     def __post_init__(self) -> None:
         s = self.settings
@@ -139,11 +142,16 @@ def rate_limit(request: Request) -> None:
 
 def get_extraction_service(request: Request) -> ExtractionService:
     st = get_state(request)
-    return ExtractionService(st.get_llm(), st.settings, st.extract_cache)
+    return ExtractionService(st.get_llm(), st.settings, st.extract_cache, st.extract_flights)
 
 
 def get_verification_service(request: Request) -> VerificationService:
     st = get_state(request)
     return VerificationService(
-        st.get_llm(), st.settings, st.http_client, st.verify_cache, st.get_retriever()
+        st.get_llm(),
+        st.settings,
+        st.http_client,
+        st.verify_cache,
+        st.get_retriever(),
+        st.verify_flights,
     )

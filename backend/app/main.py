@@ -6,13 +6,11 @@ Run locally:  uvicorn app.main:app --host 127.0.0.1 --port 8000
 from __future__ import annotations
 
 import logging
-import time
-import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -22,8 +20,9 @@ from app.api.routes import router
 from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
-from app.core.logging import configure_logging, request_id_var
+from app.core.logging import configure_logging
 from app.core.rate_limit import SlidingWindowRateLimiter
+from app.core.request_context import RequestContextMiddleware
 from app.services.llm import LLMClient
 
 log = logging.getLogger("youverify")
@@ -72,30 +71,7 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None) -
         allow_credentials=False,
     )
 
-    @app.middleware("http")
-    async def request_context(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        request_id = uuid.uuid4().hex[:12]
-        # Every log line written while serving this request carries its id.
-        token = request_id_var.set(request_id)
-        started = time.perf_counter()
-        try:
-            response = await call_next(request)
-        finally:
-            request_id_var.reset(token)
-        response.headers["X-Request-ID"] = request_id
-        log.info(
-            "request",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "status": response.status_code,
-                "duration_ms": int((time.perf_counter() - started) * 1000),
-            },
-        )
-        return response
+    app.add_middleware(RequestContextMiddleware)  # outermost: ids every response
 
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:

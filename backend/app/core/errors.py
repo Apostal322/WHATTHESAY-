@@ -93,6 +93,13 @@ class ConfigurationError(AppError):
     status_code = 503
 
 
+class ClientDisconnectedError(AppError):
+    """The client went away before the result was ready; the work was cancelled."""
+
+    code = "client_disconnected"
+    status_code = 499
+
+
 class InvalidModelOutputError(AppError):
     code = "invalid_model_output"
     status_code = 502

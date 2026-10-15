@@ -16,6 +16,7 @@ import httpx
 from app.core.cache import TTLCache
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.singleflight import SingleFlight
 from app.models.llm_outputs import ClaimAnalysisOutput, EvaluationOutput
 from app.models.schemas import (
     ClaimType,
@@ -215,10 +216,12 @@ class VerificationService:
         http_client: httpx.AsyncClient | None = None,
         cache: TTLCache[VerifyResponse] | None = None,
         retriever: Retriever | None = None,
+        flights: SingleFlight[VerifyResponse, Stage] | None = None,
     ) -> None:
         self._llm = llm
         self._settings = settings
         self._cache = cache
+        self._flights = flights
         self._retriever = retriever or GeminiGroundingRetriever(
             llm, settings.verification_model, http_client, settings.resolve_source_redirects
         )
@@ -231,7 +234,19 @@ class VerificationService:
         cache_key = verification_cache_key(req, model, self._retriever.name)
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
+        if self._flights is None:
+            return await self._verify(req, cache_key, progress)
+        # Identical concurrent requests share one verification (and its model calls).
+        response, joined = await self._flights.run(
+            cache_key, lambda emit: self._verify(req, cache_key, emit), listener=progress
+        )
+        return response.model_copy(update={"cached": True}) if joined else response
 
+    async def _verify(
+        self, req: VerifyRequest, cache_key: str, progress: ProgressCallback
+    ) -> VerifyResponse:
+        s = self._settings
+        model = s.verification_model
         started = time.perf_counter()
         usage = Usage()
 

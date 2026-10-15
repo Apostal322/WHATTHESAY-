@@ -56,11 +56,20 @@ export function App({ api, videoSource }: Props) {
     [api, language],
   );
 
+  // Set synchronously on click: a second click while the position is still being read must
+  // not start a second extraction (each one is a paid video model call).
+  const startingRef = useRef(false);
   const startFromVideo = useCallback(async () => {
-    // Re-read at click time so the timestamp is exactly where the user is now.
-    const fresh = await refresh();
-    if (fresh.status !== "ok") return;
-    await extract(fresh.videoId, fresh.timestampSec, fresh.durationSec);
+    if (startingRef.current) return;
+    startingRef.current = true;
+    try {
+      // Re-read at click time so the timestamp is exactly where the user is now.
+      const fresh = await refresh();
+      if (fresh.status !== "ok") return;
+      await extract(fresh.videoId, fresh.timestampSec, fresh.durationSec);
+    } finally {
+      startingRef.current = false;
+    }
   }, [extract, refresh]);
 
   const verify = useCallback(async () => {

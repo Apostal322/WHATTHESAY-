@@ -7,6 +7,7 @@ import time
 
 from app.core.cache import TTLCache
 from app.core.config import Settings
+from app.core.singleflight import SingleFlight
 from app.models.llm_outputs import ExtractionOutput
 from app.models.schemas import ExtractRequest, ExtractResponse, TimeWindow, TokenUsage
 from app.services.llm import LLMClient, VideoClip
@@ -34,11 +35,16 @@ def compute_window(
 
 class ExtractionService:
     def __init__(
-        self, llm: LLMClient, settings: Settings, cache: TTLCache[ExtractResponse] | None = None
+        self,
+        llm: LLMClient,
+        settings: Settings,
+        cache: TTLCache[ExtractResponse] | None = None,
+        flights: SingleFlight[ExtractResponse, None] | None = None,
     ) -> None:
         self._llm = llm
         self._settings = settings
         self._cache = cache
+        self._flights = flights
 
     async def extract(self, req: ExtractRequest) -> ExtractResponse:
         s = self._settings
@@ -51,7 +57,18 @@ class ExtractionService:
         cache_key = f"{video_id}:{bucket}:{req.language}:{s.extraction_model}"
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
+        if self._flights is None:
+            return await self._extract(req, video_id, window, cache_key)
+        # A second click on the same moment while the first is running shares its model call.
+        response, joined = await self._flights.run(
+            cache_key, lambda _emit: self._extract(req, video_id, window, cache_key)
+        )
+        return response.model_copy(update={"cached": True}) if joined else response
 
+    async def _extract(
+        self, req: ExtractRequest, video_id: str, window: TimeWindow, cache_key: str
+    ) -> ExtractResponse:
+        s = self._settings
         started = time.perf_counter()
         result = await self._llm.generate_json(
             model=s.extraction_model,

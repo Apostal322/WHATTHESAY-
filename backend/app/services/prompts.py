@@ -10,6 +10,7 @@ Principles applied throughout:
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from app.services.youtube import format_mmss
 
@@ -138,6 +139,8 @@ Rules:
   insufficient_evidence: the sources do not settle the claim.
   not_verifiable: the claim is an opinion, prediction, or otherwise not checkable.
 - Claims about what someone said ("X said Y"): only the speaker's own words, a quotation of them or a transcript line, can support or contradict it. An outlet's summary, headline or characterization of what they meant is at most partially_supports or unclear, and words the claim quotes must appear verbatim in a source to be confirmed. Never present an outlet's wording as the speaker's.
+- A source that only mentions, quotes or reports the claim is not support for it: support means the source itself states or documents the fact. An article that repeats a rumour in order to debunk it contradicts the claim; one that reports what someone asserted, without endorsing it, is evidence of what was said, not that it is true. A matching phrase in an unrelated context is irrelevant.
+- Time: keep apart when the statement was made, the period it is about, and when each source was published. Evidence that appeared later, or describes a later period, cannot by itself show the statement was false when it was made; say so instead of treating it as a contradiction.
 - When in doubt, choose insufficient_evidence. Overstating certainty is worse than admitting uncertainty.
 - Each source states where its excerpts come from: verbatim page text, a search-engine snippet, or a model summary attributed by search grounding. Snippets and summaries are weaker than page text: mention this in limitations if the verdict hinges on one of them."""
 
@@ -149,6 +152,7 @@ def evaluation_prompt(
     sources_block: str,
     language: str,
     context: str | None = None,
+    today: date | None = None,
 ) -> str:
     scope = f"\nScope considerations: {escape_untrusted(scope_notes)}" if scope_notes else ""
     ctx = (
@@ -159,7 +163,9 @@ def evaluation_prompt(
         if context
         else ""
     )
-    return f"""Claim to evaluate:
+    as_of = (today or date.today()).isoformat()
+    return f"""Today's date: {as_of}.
+Claim to evaluate:
 <untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}
 
 Sources:
