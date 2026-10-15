@@ -409,3 +409,61 @@ async def test_h10_shared_work_survives_one_caller_leaving_and_stops_when_all_le
         await c
     await asyncio.sleep(0.01)
     assert runs == ["start", "cancelled"] and flights.in_flight() == 0
+
+
+# ------------------------- H-12: conflicting assessments of one source cannot back a verdict
+
+
+async def test_h12_a_source_assessed_both_ways_counts_as_unclear(settings: Settings) -> None:
+    evaluation = {
+        **EVAL_SUPPORTED,
+        "source_assessments": [
+            {"source_id": "S1", "stance": "contradicts", "note": "Says the opposite."},
+            {"source_id": "S1", "stance": "supports", "note": "Agrees."},
+        ],
+    }
+    llm = FakeLLM(
+        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL, "EvaluationOutput": evaluation}
+    )
+    resp = await VerificationService(llm, settings, retriever=StaticRetriever()).verify(
+        VerifyRequest(claim="The tower opened to the public in 1889.")
+    )
+    assert resp.verdict == "insufficient_evidence"
+    assert resp.sources[0].stance == "unclear"
+    assert any("conflicting" in n for n in resp.guardrail_notes)
+
+
+# --------------------------------- H-13: counterexamples found by property-based tests
+
+
+def test_h13_an_unclosed_delimiter_fragment_is_escaped_too() -> None:
+    assert "<untrusted" not in escape_untrusted("<untrusted").lower()
+    assert escape_untrusted("</untrusted> rest") == "(/untrusted) rest"
+
+
+def test_h13_canonical_url_is_stable_under_repeated_amp_segments() -> None:
+    from app.services.evidence import canonical_url
+
+    once = canonical_url("https://example.org/news/amp/amp")
+    assert once == canonical_url(once) == "https://example.org/news"
+
+
+# ------------------------------------------------- H-14: diagnosable log lines
+
+
+async def test_h14_verification_log_says_which_stage_ran_and_which_safeguard_fired(
+    settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    evaluation = {**EVAL_SUPPORTED, "source_assessments": []}  # verdict with no backing
+    llm = FakeLLM(
+        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL, "EvaluationOutput": evaluation}
+    )
+    with caplog.at_level(logging.INFO, logger="app.services.verification"):
+        await VerificationService(llm, settings, retriever=StaticRetriever()).verify(
+            VerifyRequest(claim="The tower opened to the public in 1889.")
+        )
+    record = next(r for r in caplog.records if r.getMessage() == "claim_verified")
+    assert set(record.stage_ms) == {"analysis", "retrieval", "evaluation"}  # type: ignore[attr-defined]
+    assert record.safeguards == ["verdict_without_backing_source"]  # type: ignore[attr-defined]

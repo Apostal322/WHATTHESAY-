@@ -233,6 +233,7 @@ class VerificationService:
         model = s.verification_model
         cache_key = verification_cache_key(req, model, self._retriever.name)
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
+            log.info("verify_cache_hit", extra={"verdict": hit.verdict})
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
         if self._flights is None:
             return await self._verify(req, cache_key, progress)
@@ -240,6 +241,8 @@ class VerificationService:
         response, joined = await self._flights.run(
             cache_key, lambda emit: self._verify(req, cache_key, emit), listener=progress
         )
+        if joined:
+            log.info("verify_coalesced", extra={"verdict": response.verdict})
         return response.model_copy(update={"cached": True}) if joined else response
 
     async def _verify(
@@ -248,6 +251,14 @@ class VerificationService:
         s = self._settings
         model = s.verification_model
         started = time.perf_counter()
+        stage_ms: dict[str, int] = {}  # which stage was slow, in the log line
+
+        def lap(stage: str, since: float) -> float:
+            now = time.perf_counter()
+            stage_ms[stage] = int((now - since) * 1000)
+            return now
+
+        mark = started
         usage = Usage()
 
         # --- Step A': classify + plan queries (also covers manual claims) ----
@@ -263,6 +274,7 @@ class VerificationService:
         usage += res.usage
         models_used = {"analysis": res.model}
         analysis = parse_model_json(res.text, ClaimAnalysisOutput)
+        mark = lap("analysis", mark)
         normalized = clip(analysis.normalized_claim, 1000) or req.claim
         queries = [q for q in (clip(x, 200) for x in analysis.search_queries) if q][:4] or [
             normalized
@@ -292,7 +304,10 @@ class VerificationService:
                     "sources": len(resp.sources),
                     "retrieval": retrieval.backend if retrieval else None,
                     "latency_ms": resp.latency_ms,
+                    "stage_ms": dict(stage_ms),
                     "total_tokens": usage.total_tokens,
+                    "estimated_cost_usd": resp.usage.estimated_cost_usd,
+                    "safeguards": [a.rule for a in resp.verdict_adjustments],
                 },
             )
             if self._cache is not None:
@@ -351,6 +366,7 @@ class VerificationService:
         except AppError as exc:
             raise keep_progress(exc) from None
         usage += retrieval.usage
+        mark = lap("retrieval", mark)
         if retrieval.model:
             models_used["retrieval"] = retrieval.model
         retrieved_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -393,6 +409,7 @@ class VerificationService:
             usage += res.usage
             models_used["evaluation"] = res.model
             evaluation = parse_model_json(res.text, EvaluationOutput)
+            mark = lap("evaluation", mark)
         except AppError as exc:
             raise keep_progress(exc) from None
 
@@ -402,14 +419,24 @@ class VerificationService:
         stances: dict[str, Stance] = {}
         assessment_notes: dict[str, str | None] = {}
         dropped = 0
+        conflicting: set[str] = set()
         for a in evaluation.source_assessments:
-            if a.source_id in by_id:
+            if a.source_id not in by_id:
+                dropped += 1
+            elif a.source_id in stances and stances[a.source_id] != a.stance:
+                # Assessed two ways: neither stance can be relied on to back a verdict.
+                conflicting.add(a.source_id)
+                stances[a.source_id] = "unclear"
+            elif a.source_id not in conflicting:
                 stances[a.source_id] = a.stance
                 assessment_notes[a.source_id] = clip(a.note, 400)
-            else:
-                dropped += 1
         if dropped:
             notes.append(f"Ignored {dropped} assessment(s) that referenced unknown sources.")
+        if conflicting:
+            notes.append(
+                "The evaluation gave conflicting assessments of "
+                f"{', '.join(sorted(conflicting))}; treated as unclear."
+            )
 
         # Safeguards (verdict changes) are recorded apart from warnings (guardrail notes).
         adjustments: list[VerdictAdjustment] = []

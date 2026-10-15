@@ -36,7 +36,7 @@ def canonical_url(url: str) -> str:
     """Key for duplicate detection (not for display)."""
     parts = urlsplit(url)
     host = (parts.hostname or "").lower().removeprefix("www.").removeprefix("m.")
-    path = re.sub(r"/amp/?$", "", parts.path).rstrip("/") or "/"
+    path = re.sub(r"(?:/amp)+/?$", "", parts.path).rstrip("/") or "/"
     query = urlencode(
         sorted((k, v) for k, v in parse_qsl(parts.query) if not _TRACKING_PARAMS.match(k))
     )

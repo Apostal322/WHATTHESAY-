@@ -29,7 +29,7 @@ def output_language_instruction(language: str) -> str:
 
 
 # Anything a reader could take for our delimiter: any case, spaces, attributes, line breaks.
-_DELIMITER_RE = re.compile(r"<\s*(/?)\s*untrusted\b[^>]*>", re.I)
+_DELIMITER_RE = re.compile(r"<\s*(/?)\s*untrusted(?:\b[^<>]*>)?", re.I)
 
 
 def escape_untrusted(text: str) -> str:

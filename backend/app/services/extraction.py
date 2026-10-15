@@ -56,6 +56,7 @@ class ExtractionService:
         bucket = int(req.timestamp_sec) // _CACHE_BUCKET_SEC
         cache_key = f"{video_id}:{bucket}:{req.language}:{s.extraction_model}"
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
+            log.info("extract_cache_hit", extra={"video_id": video_id})
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
         if self._flights is None:
             return await self._extract(req, video_id, window, cache_key)
