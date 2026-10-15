@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "e2e": "node e2e/smoke.mjs",
     "e2e:live": "node e2e/live.mjs",
-    "screenshots": "node e2e/screenshots.mjs"
+    "screenshots": "node e2e/screenshots.mjs",
+    "check:remote-code": "node scripts/check-no-remote-code.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

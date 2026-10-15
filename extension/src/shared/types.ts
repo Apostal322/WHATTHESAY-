@@ -96,6 +96,8 @@ export interface VerifyResponse {
   guardrail_notes: string[];
   /** Absent from older backends. */
   verdict_adjustments?: VerdictAdjustment[];
+  /** Model that served each step (analysis, retrieval, evaluation); absent from older backends. */
+  models_used?: Record<string, string>;
   model: string;
   latency_ms: number;
   cached: boolean;
@@ -114,6 +116,8 @@ export interface HealthResponse {
   gemini_configured: boolean;
   extraction_model: string;
   verification_model: string;
+  /** Absent from older backends. */
+  retrieval_backend?: "gemini_grounding" | "search";
 }
 
 /** What the content script reports about the current tab. */

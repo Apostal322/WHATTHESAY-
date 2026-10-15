@@ -47,6 +47,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run check:remote-code  # MV3: no remote or eval'd code in the package
 
   # Known vulnerabilities in the declared runtime dependencies (not the runner's own tools).
   dependency-audit:

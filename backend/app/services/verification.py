@@ -427,6 +427,7 @@ class VerificationService:
                 # Assessed two ways: neither stance can be relied on to back a verdict.
                 conflicting.add(a.source_id)
                 stances[a.source_id] = "unclear"
+                assessment_notes[a.source_id] = "The evaluation assessed this source both ways."
             elif a.source_id not in conflicting:
                 stances[a.source_id] = a.stance
                 assessment_notes[a.source_id] = clip(a.note, 400)

@@ -430,6 +430,7 @@ async def test_h12_a_source_assessed_both_ways_counts_as_unclear(settings: Setti
     )
     assert resp.verdict == "insufficient_evidence"
     assert resp.sources[0].stance == "unclear"
+    assert resp.sources[0].assessment_note == "The evaluation assessed this source both ways."
     assert any("conflicting" in n for n in resp.guardrail_notes)
 
 
@@ -478,3 +479,36 @@ def test_h15_taxonomy_and_compound_claim_rules_reach_the_model() -> None:
     assert "Questions, hypotheticals" in prompt and "Compound claims" in prompt
     assert "never give medical advice" in EVALUATION_SYSTEM
     assert "a fact with an unsupported cause" in EVALUATION_SYSTEM
+
+
+# --------------------------------------------- known limitation, recorded as a failing test
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Known limitation (docs/quality/defects.md, L-1): the attribution safeguard checks "
+    "for the speaker's own words, not that they say what the claim says. A transcript line by "
+    "the right speaker on another topic still passes if the model wrongly calls it supporting.",
+)
+async def test_l1_speakers_own_words_on_another_topic_should_not_confirm(
+    settings: Settings,
+) -> None:
+    class Transcript(StaticRetriever):
+        async def retrieve(self, **kw: object) -> RetrievalResult:
+            src = EvidenceSource(
+                "S1",
+                "https://transcripts.example.org/t",
+                "Transcript",
+                "transcripts.example.org",
+                ["MODERATOR: Taxes? DOE: I will vote to raise taxes next year."],
+                origin="page_text",
+            )
+            return RetrievalResult(sources=[src], executed_queries=["q"], backend="static")
+
+    llm = FakeLLM(
+        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL, "EvaluationOutput": EVAL_SUPPORTED}
+    )
+    resp = await VerificationService(llm, settings, retriever=Transcript()).verify(
+        VerifyRequest(claim="Senator Jane Doe said she would vote to keep the ban.")
+    )
+    assert resp.verdict == "insufficient_evidence"
