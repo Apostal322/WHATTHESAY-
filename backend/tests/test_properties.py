@@ -12,8 +12,8 @@ import string
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from app.core.rate_limit import SlidingWindowRateLimiter
 from app.core.errors import RateLimitedError
+from app.core.rate_limit import SlidingWindowRateLimiter
 from app.models.schemas import Stance, Verdict
 from app.services.citations import EvidenceSource, is_safe_display_url
 from app.services.evidence import canonical_url
