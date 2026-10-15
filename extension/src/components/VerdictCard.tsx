@@ -1,9 +1,14 @@
+import { useEffect, useRef } from "react";
 import { CLAIM_TYPE_LABEL, STANCE_LABEL, VERDICT_LABEL, VERDICT_SUMMARY } from "../shared/format";
 import type { VerifyResponse } from "../shared/types";
 import { CitedText } from "./CitedText";
 
 export function VerdictCard({ result }: { result: VerifyResponse }) {
   const ids = new Set(result.sources.map((s) => s.id));
+  // The progress live region disappears when the result arrives; moving focus to the verdict
+  // makes screen readers announce it and puts keyboard users at the start of the result.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => headingRef.current?.focus(), []);
   const adjustments = result.verdict_adjustments ?? [];
   // The backend also states each verdict change as a guardrail note for older clients; shown
   // once here, in the safeguard notice.
@@ -13,7 +18,7 @@ export function VerdictCard({ result }: { result: VerifyResponse }) {
   return (
     <section className={`card verdict verdict-${result.verdict}`} aria-labelledby="verdict-title">
       <div className="verdict-head">
-        <h2 id="verdict-title" className="verdict-label">
+        <h2 id="verdict-title" className="verdict-label" ref={headingRef} tabIndex={-1}>
           {VERDICT_LABEL[result.verdict]}
         </h2>
         <span className="badge">{CLAIM_TYPE_LABEL[result.claim_type]}</span>

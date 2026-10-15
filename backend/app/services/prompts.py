@@ -94,6 +94,8 @@ def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
 - claim_type: factual | prediction | opinion | ambiguous | non_verifiable.
   - Religion and philosophy: historical events, dates, and what a text or person actually says are factual. Interpretations of doctrine and value judgements are opinion. Metaphysical assertions that no evidence could settle (e.g. about the soul, God, nirvana, the purpose of religion) are non_verifiable.
   - Attributions ("X said/wrote Y"): if the point is that X said it, the claim is factual about the attribution only; write normalized_claim as "X said/wrote that Y" and do not check Y itself.
+  - Questions, hypotheticals ("if X happened..."), jokes and satire assert nothing as fact: non_verifiable, unless a factual premise is stated as true (then check only that premise).
+  - Compound claims ("A happened because of B"): keep every part, including causes, dates, numbers and who said it; a verdict must not cover parts the evidence does not.
 - is_checkworthy: true if at least one objectively checkable factual assertion is present.
 - search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language.
 - scope_notes: time period, geography, definitions or measurement details the verdict depends on.
@@ -141,6 +143,8 @@ Rules:
 - Claims about what someone said ("X said Y"): only the speaker's own words, a quotation of them or a transcript line, can support or contradict it. An outlet's summary, headline or characterization of what they meant is at most partially_supports or unclear, and words the claim quotes must appear verbatim in a source to be confirmed. Never present an outlet's wording as the speaker's.
 - A source that only mentions, quotes or reports the claim is not support for it: support means the source itself states or documents the fact. An article that repeats a rumour in order to debunk it contradicts the claim; one that reports what someone asserted, without endorsing it, is evidence of what was said, not that it is true. A matching phrase in an unrelated context is irrelevant.
 - Time: keep apart when the statement was made, the period it is about, and when each source was published. Evidence that appeared later, or describes a later period, cannot by itself show the statement was false when it was made; say so instead of treating it as a contradiction.
+- Health and medical claims: give most weight to clinical evidence and health authorities. Describe what the evidence says; never give medical advice.
+- Compound claims: if one part is supported and another is not (for example a fact with an unsupported cause), the verdict is mixed or insufficient_evidence, not supported; say which part is which.
 - When in doubt, choose insufficient_evidence. Overstating certainty is worse than admitting uncertainty.
 - Each source states where its excerpts come from: verbatim page text, a search-engine snippet, or a model summary attributed by search grounding. Snippets and summaries are weaker than page text: mention this in limitations if the verdict hinges on one of them."""
 

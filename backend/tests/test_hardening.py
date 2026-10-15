@@ -467,3 +467,14 @@ async def test_h14_verification_log_says_which_stage_ran_and_which_safeguard_fir
     record = next(r for r in caplog.records if r.getMessage() == "claim_verified")
     assert set(record.stage_ms) == {"analysis", "retrieval", "evaluation"}  # type: ignore[attr-defined]
     assert record.safeguards == ["verdict_without_backing_source"]  # type: ignore[attr-defined]
+
+
+def test_h15_taxonomy_and_compound_claim_rules_reach_the_model() -> None:
+    """Contract test only: whether the model applies them needs labelled live cases."""
+    from app.services.prompts import EVALUATION_SYSTEM, analysis_prompt
+
+    prompt = analysis_prompt(claim="If prices doubled, would people notice?", context=None,
+                             language="en")  # fmt: skip
+    assert "Questions, hypotheticals" in prompt and "Compound claims" in prompt
+    assert "never give medical advice" in EVALUATION_SYSTEM
+    assert "a fact with an unsupported cause" in EVALUATION_SYSTEM

@@ -33,4 +33,9 @@ describe("VerdictCard safeguards vs warnings", () => {
     expect(screen.queryByRole("note", { name: "Safeguard applied" })).not.toBeInTheDocument();
     expect(screen.getByText(CHANGE_NOTE)).toBeInTheDocument();
   });
+
+  it("moves focus to the verdict so it is announced when the result arrives", () => {
+    render(<VerdictCard result={verification()} />);
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2 }));
+  });
 });
