@@ -6,8 +6,12 @@ import json
 import logging
 import re
 import sys
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
+
+# Set per HTTP request by the app middleware; included in every log line written for it.
+request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 _RESERVED = set(logging.makeLogRecord({}).__dict__) | {"message", "asctime"}
 
@@ -34,6 +38,8 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "msg": record.getMessage(),
         }
+        if (request_id := request_id_var.get()) is not None:
+            payload["request_id"] = request_id
         for key, value in record.__dict__.items():
             if key not in _RESERVED and not key.startswith("_"):
                 payload[key] = value

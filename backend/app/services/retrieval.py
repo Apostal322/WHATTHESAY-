@@ -249,12 +249,36 @@ class SearchRetriever:
                 diagnostics={"stage": "fetch", "fetch": statuses, "searches": attempts},
             )
         backend = "+".join(dict.fromkeys(served_by)) or "none"
+        unread = sum(st.startswith("fetch_failed") for st in statuses)
+        no_passage = statuses.count("no_relevant_passage")
         if not hits:
             empty = "The search returned no results for this claim."
         elif not ranked:
             empty = "Search results were found, but none were relevant to the claim."
+        elif unread:
+            empty = (
+                f"Of {len(ranked)} relevant result pages, {unread} could not be read and "
+                f"{no_passage} contained no passage about the claim."
+            )
         else:
             empty = "Relevant pages were read, but none contained a passage about the claim."
+        # Partial failures are not errors, but the evidence may be incomplete: say so.
+        notices: list[str] = []
+        failed_queries = [
+            q for q, (o, _) in zip(queries, outcomes, strict=True) if o.response is None and any(
+                a.error for a in o.attempts
+            )
+        ]  # fmt: skip
+        if failed_queries and hits:
+            notices.append(
+                f"{len(failed_queries)} of {len(queries)} searches failed (provider errors); "
+                "the evidence may be incomplete."
+            )
+        if unread and sources:
+            notices.append(
+                f"{unread} of {len(ranked)} result pages could not be read; search snippets "
+                "were used where available."
+            )
         return RetrievalResult(
             sources=dedupe_and_number(sources),
             executed_queries=list(hits),
@@ -262,6 +286,7 @@ class SearchRetriever:
             billed_searches=billed,
             search_cost_usd=round(cost, 6) if cost is not None else None,
             empty_reason=empty,
+            notices=notices,
             diagnostics={
                 "searches": attempts,
                 "ranked": [

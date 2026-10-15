@@ -19,9 +19,10 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import AppState
 from app.api.routes import router
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, request_id_var
 from app.core.rate_limit import SlidingWindowRateLimiter
 from app.services.llm import LLMClient
 
@@ -60,6 +61,9 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None) -
 
     app = FastAPI(title="YouVerify AI", version="0.1.0", lifespan=lifespan)
 
+    # Middleware added first runs innermost: the size limit sits inside CORS, so a 413 still
+    # carries CORS headers and the extension can read it.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_body_bytes)
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=settings.allowed_origin_regex,
@@ -73,11 +77,13 @@ def create_app(settings: Settings | None = None, llm: LLMClient | None = None) -
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         request_id = uuid.uuid4().hex[:12]
-        length = request.headers.get("content-length")
-        if length and length.isdigit() and int(length) > settings.max_body_bytes:
-            return _error(413, "payload_too_large", "Request body is too large.")
+        # Every log line written while serving this request carries its id.
+        token = request_id_var.set(request_id)
         started = time.perf_counter()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_var.reset(token)
         response.headers["X-Request-ID"] = request_id
         log.info(
             "request",

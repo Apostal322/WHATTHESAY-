@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 import re
 import time
@@ -40,6 +41,8 @@ Stage = Literal["analyzing", "searching", "evaluating"]
 ProgressCallback = Callable[[Stage], Awaitable[None]]
 
 NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
+# Bump when prompts or verdict safeguards change what a cached response would say.
+VERIFICATION_POLICY_VERSION = "2026-10-15"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 # Text between straight or curly double quotes; single quotes are too often apostrophes.
@@ -184,6 +187,23 @@ def independent_domains(stances: dict[str, Stance], sources: dict[str, EvidenceS
     return len({groups[sid] for sid in used})
 
 
+def verification_cache_key(req: VerifyRequest, model: str, retriever: str) -> str:
+    """Everything the verdict depends on: the claim *and* its context.
+
+    The same words are a different claim in a different video ("He said he would vote no"),
+    and the context is given to both the analysis and the evaluation prompts.
+    """
+    parts = [
+        " ".join(req.claim.lower().split()),
+        " ".join((req.context or "").split()),
+        req.language,
+        model,
+        retriever,
+        VERIFICATION_POLICY_VERSION,
+    ]
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
+
+
 # --------------------------------------------------------------------- service
 
 
@@ -208,9 +228,7 @@ class VerificationService:
     ) -> VerifyResponse:
         s = self._settings
         model = s.verification_model
-        cache_key = (
-            f"{' '.join(req.claim.lower().split())}|{req.language}|{model}|{self._retriever.name}"
-        )
+        cache_key = verification_cache_key(req, model, self._retriever.name)
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
 

@@ -9,6 +9,8 @@ Principles applied throughout:
 
 from __future__ import annotations
 
+import re
+
 from app.services.youtube import format_mmss
 
 _UNTRUSTED_NOTE = (
@@ -25,9 +27,18 @@ def output_language_instruction(language: str) -> str:
     return "Write all free-text fields in the same language as the claim."
 
 
+# Anything a reader could take for our delimiter: any case, spaces, attributes, line breaks.
+_DELIMITER_RE = re.compile(r"<\s*(/?)\s*untrusted\b[^>]*>", re.I)
+
+
 def escape_untrusted(text: str) -> str:
-    # Prevent untrusted text from closing our delimiter.
-    return text.replace("<untrusted>", "(untrusted)").replace("</untrusted>", "(/untrusted)")
+    """Prevent untrusted text from opening or closing our delimiter."""
+    return _DELIMITER_RE.sub(lambda m: f"({m.group(1)}untrusted)", text)
+
+
+def untrusted_line(text: str) -> str:
+    """Untrusted text on one line, so it cannot start a new line that looks like structure."""
+    return escape_untrusted(" ".join(text.split()))
 
 
 # ---------------------------------------------------------------- extraction

@@ -24,9 +24,22 @@ class SlidingWindowRateLimiter:
         self._window = window_sec
         self._clock = clock
         self._hits: defaultdict[str, deque[float]] = defaultdict(deque)
+        self._last_purge = clock()
+
+    def _purge(self, now: float) -> None:
+        """Forget clients with no request in the current window (bounded memory)."""
+        stale = [k for k, h in self._hits.items() if not h or now - h[-1] >= self._window]
+        for key in stale:
+            del self._hits[key]
+        self._last_purge = now
+
+    def tracked_clients(self) -> int:
+        return len(self._hits)
 
     def check(self, client_key: str) -> None:
         now = self._clock()
+        if now - self._last_purge >= self._window:
+            self._purge(now)
         hits = self._hits[client_key]
         while hits and now - hits[0] >= self._window:
             hits.popleft()

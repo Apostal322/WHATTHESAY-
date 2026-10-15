@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import socket
 from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import urlsplit
@@ -62,13 +63,19 @@ def is_safe_display_url(url: str) -> bool:
         return False
     if parts.scheme not in {"http", "https"} or parts.username or parts.password:
         return False
-    host = (parts.hostname or "").lower()
-    if not host or host == "localhost" or host.endswith(".local") or "." not in host:
+    host = (parts.hostname or "").lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith((".local", ".localhost")):
+        return False
+    if "." not in host and ":" not in host:
         return False
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        return True
+        # Browsers and resolvers read "127.1", "0177.0.0.1" and "0x7f.1" as IPv4 addresses.
+        try:
+            ip = ipaddress.IPv4Address(socket.inet_aton(host))
+        except OSError:
+            return True  # a host name
     return ip.is_global
 
 
@@ -174,17 +181,20 @@ def format_sources_for_prompt(
     `same_origin` maps a source id to other ids that share its site or republish
     the same report, so the evaluator does not count them as independent.
     """
-    from app.services.prompts import escape_untrusted
+    from app.services.prompts import untrusted_line
 
     blocks = []
     for src in sources:
+        # Titles and domains come from the web, like the excerpts: wrapped as data, on one line.
+        title = untrusted_line(src.title or "Untitled")
+        domain = untrusted_line(src.domain or "unknown domain")
         header = (
-            f"[{src.id}] {src.title or 'Untitled'} ({src.domain or 'unknown domain'}); "
+            f"[{src.id}] title: <untrusted>{title}</untrusted>; domain: {domain}; "
             f"excerpts: {_ORIGIN_LABEL[src.origin]}"
         )
         if same_origin and same_origin.get(src.id):
             header += f"; same site or same original report as {', '.join(same_origin[src.id])}"
         lines = [header]
-        lines += [f"  - <untrusted>{escape_untrusted(ex)}</untrusted>" for ex in src.excerpts]
+        lines += [f"  - <untrusted>{untrusted_line(ex)}</untrusted>" for ex in src.excerpts]
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)

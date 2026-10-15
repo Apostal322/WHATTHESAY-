@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -16,6 +17,17 @@ MAX_TIMESTAMP_SEC = 12 * 60 * 60  # 12h: longer than any standard (non-live) upl
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+def strip_invisible(text: str) -> str:
+    """Remove control and invisible format characters (NUL, ESC, zero-width spaces, ...).
+
+    They carry no meaning in a claim, can hide text from the user while the model still reads
+    it, and break exact matching of quoted words. Ordinary whitespace is kept.
+    """
+    return "".join(
+        ch for ch in text if ch in "\t\n\r" or unicodedata.category(ch) not in ("Cc", "Cf")
+    )
 
 
 # --------------------------------------------------------------------- usage
@@ -40,8 +52,9 @@ class TokenUsage(BaseModel):
 class ExtractRequest(_Strict):
     youtube_url: str | None = Field(default=None, max_length=300)
     video_id: str | None = Field(default=None, max_length=11)
-    timestamp_sec: float = Field(ge=0, le=MAX_TIMESTAMP_SEC)
-    duration_sec: float | None = Field(default=None, gt=0, le=MAX_TIMESTAMP_SEC)
+    # strict: a number, not `true` or "12"
+    timestamp_sec: float = Field(ge=0, le=MAX_TIMESTAMP_SEC, strict=True)
+    duration_sec: float | None = Field(default=None, gt=0, le=MAX_TIMESTAMP_SEC, strict=True)
     language: Language = "auto"
 
     @model_validator(mode="after")
@@ -92,8 +105,13 @@ class VerifyRequest(_Strict):
     context: str | None = Field(default=None, max_length=2000)
     claim_type_hint: ClaimType | None = None
     video_id: str | None = Field(default=None, max_length=11)
-    timestamp_sec: float | None = Field(default=None, ge=0, le=MAX_TIMESTAMP_SEC)
+    timestamp_sec: float | None = Field(default=None, ge=0, le=MAX_TIMESTAMP_SEC, strict=True)
     language: Language = "auto"
+
+    @field_validator("claim", "context", mode="before")
+    @classmethod
+    def _clean(cls, v: object) -> object:
+        return strip_invisible(v) if isinstance(v, str) else v
 
     @field_validator("claim")
     @classmethod
