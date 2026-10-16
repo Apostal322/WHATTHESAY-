@@ -7,17 +7,19 @@ Commands, repository layout, manual testing and troubleshooting. Setup is in the
 
 ```bash
 # backend (from backend/)
-pytest                    # 297 tests, no network, no key
+pytest                    # 356 tests, no network, no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                  # strict
 python ../scripts/scan_secrets.py            # tracked files (CI); add --staged before a commit
+python ../scripts/check_doc_links.py         # relative links and anchors in Markdown (CI)
 
 # extension (from extension/)
-npm test                  # vitest + Testing Library (41 tests)
+npm test                  # vitest + Testing Library (46 tests)
 npm run typecheck
 npm run build
 npm run e2e               # needs the build + a backend on :8000 (see below)
 npm run screenshots       # README images; needs the build + `python -m tests.demo_server`
+npm run check:remote-code # after the build: no remote or eval'd code in the package (MV3)
 ```
 
 Repository layout:

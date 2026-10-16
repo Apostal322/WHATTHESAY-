@@ -206,11 +206,11 @@ real provider), *verified with mocks* (automated tests with fake models or fixtu
 
 | Capability | Status |
 |---|---|
-| Backend API, pipeline, safeguards, error handling | ✅ Verified with mocks: **297** backend tests; Ruff, mypy (strict) clean; CI green |
-| Chrome extension UI and messaging | ✅ Verified with mocks: **41** component and unit tests; headless-Chromium E2E smoke test against the real built extension |
+| Backend API, pipeline, safeguards, error handling | ✅ Verified with mocks: **356** backend tests (incl. property-based and real-server cancellation tests); Ruff, mypy (strict) clean; CI green |
+| Chrome extension UI and messaging | ✅ Verified with mocks: **46** component, unit and randomized state-machine tests; Chromium smoke test of the real built extension (incl. a service-worker restart) in CI |
 | Video claim extraction with Gemini | ✅ **Verified live**: 5 successful extractions across two Gemini models. Outputs are **not yet labelled**, so no accuracy is claimed |
 | Clip offsets reduce processed video | ✅ **Verified live**: media tokens scaled with the window length in 3/3 paired runs |
-| End-to-end live verdict with real sources | ⛔ **Blocked**: free-tier Gemini returned 503 overload and a Google Search grounding 429 quota during live attempts. No live verdict has been produced yet |
+| End-to-end live verdict with real sources | ⛔ **Blocked**: free-tier Gemini returned 503 overload and Google Search grounding 429 quota in every attempt (latest 2026-10-15). No live verdict has been produced yet |
 | Search mode (Brave / SearXNG + page fetch) | 🧪 Verified with mocks; not run live (no Brave key, and the dev sandbox blocks publisher sites) |
 | Accuracy | ⚠️ **Not measured.** It needs human-labelled cases; see [Evaluation](#evaluation-methodology) |
 | Public deployment | ❌ Not ready: single-user local backend, no auth. See the blockers in [security & privacy](docs/security-privacy.md) |
@@ -295,13 +295,13 @@ cd backend && python -m tests.demo_server     # synthetic [DEMO] data, fake mode
 
 ```bash
 # backend/
-pytest                                        # 297 tests · no network · no key
+pytest                                        # 356 tests · no network · no key
 ruff check . ../scripts && ruff format --check . ../scripts
 mypy app                                      # strict
 python ../scripts/scan_secrets.py             # also a CI step
 
 # extension/
-npm test                                      # 41 tests (Vitest + Testing Library)
+npm test                                      # 46 tests (Vitest + Testing Library)
 npm run typecheck && npm run build
 npm run e2e                                   # real extension in headless Chromium; needs `python -m tests.e2e_server`
 ```
@@ -381,7 +381,7 @@ Details and threat model: [docs/security-privacy.md](docs/security-privacy.md).
 
 ```
 backend/        FastAPI app: api/, core/, models/, services/ (pipeline), evaluation/
-backend/tests/  297 offline tests; scripted servers for E2E and screenshots
+backend/tests/  356 offline tests; scripted servers for E2E and screenshots
 extension/      Chrome MV3 extension: content/, background/, sidepanel/, components/, shared/
 scripts/        CLI tools: claim PoC, live validation, verify_claim, evidence capture, secret scan
 eval/           reference answer keys, offline evidence fixtures, run artifacts
@@ -396,6 +396,7 @@ docs/           architecture, API, development, evaluation, security, validation
 | [Development guide](docs/development.md) | Commands, repository layout, manual test plan, troubleshooting provider errors |
 | [Retrieval architecture](docs/retrieval-architecture.md) | Retrievers, search providers, independence, outage semantics, paid-search policy |
 | [Evaluation protocol](docs/evaluation.md) | Datasets, metrics, reference records, offline fixtures |
+| [Quality audit](docs/quality/README.md) | Quality matrix (PASS / FAIL / BLOCKED per requirement), defect register, release readiness, DevOps handoff, store checklist |
 | [Live validation report](docs/live-validation-report.md) | Every live run, failure diagnosis, audit findings, the attribution safeguard |
 | [Feasibility study](docs/feasibility.md) | Timestamp-based extraction with Gemini: risks and measurements |
 | [Security and privacy](docs/security-privacy.md) | Data flow, threat model, public-beta blockers |
