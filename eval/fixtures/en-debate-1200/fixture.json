@@ -1,0 +1,130 @@
+{
+  "kind": "offline_regression_fixture",
+  "live_retrieval": false,
+  "case_id": "en-debate-1200",
+  "description": "Evidence for the ABC News debate claim of 10 September 2024 (Linsey Davis on Trump, the six-week limit and Amendment 4), replayed offline through the verification pipeline. NOT live retrieval: it shows how the system reasons over these sources, not that it can find them. A source is usable only after scripts/capture_evidence.py has captured verbatim excerpts from it; until then it is 'pending_capture' and contributes nothing.",
+  "excerpt_policy": "At most 3 excerpts per source, each at most 400 characters, cut verbatim by the application's own page parser around the anchor phrases, for regression testing and attribution. Full pages are not stored; the page text's SHA-256 records what the excerpts were cut from. Excerpts are never typed in by hand, recalled from memory or taken from search-engine or AI summaries.",
+  "sources": [
+    {
+      "id": "U5",
+      "url": "https://rollcall.com/factbase/trump/transcript/donald-trump-debate-first-presidential-kamala-harris-philadelphia-september-10-2024",
+      "publisher": "Roll Call Factbase",
+      "source_type": "primary_transcript",
+      "published": "2024-09-10",
+      "located_by": "user",
+      "relevant_to": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "anchors": [
+        "very next day",
+        "more than six weeks",
+        "six-week"
+      ],
+      "capture": null,
+      "attempts": [
+        {
+          "at": "2026-10-14T12:20:00+00:00",
+          "environment": "cloud development sandbox (network policy denies publisher hosts)",
+          "result": "dns_blocked"
+        }
+      ]
+    },
+    {
+      "id": "U3",
+      "url": "https://constitutionalinitiatives.dos.fl.gov/Home/InitDetail?account=83927&seqnum=1",
+      "publisher": "Florida Department of State",
+      "source_type": "official_record",
+      "published": null,
+      "located_by": "user",
+      "relevant_to": [
+        "P5",
+        "P4"
+      ],
+      "anchors": [
+        "viability",
+        "abortion"
+      ],
+      "capture": null,
+      "attempts": [
+        {
+          "at": "2026-10-14T12:20:00+00:00",
+          "environment": "cloud development sandbox (network policy denies publisher hosts)",
+          "result": "dns_blocked"
+        }
+      ]
+    },
+    {
+      "id": "U2",
+      "url": "https://www.reuters.com/world/us/trump-says-hell-vote-against-florida-amendment-enshrining-abortion-rights-2024-08-30/",
+      "publisher": "Reuters",
+      "source_type": "wire_report",
+      "published": "2024-08-30",
+      "located_by": "user",
+      "relevant_to": [
+        "P2",
+        "P3",
+        "P1"
+      ],
+      "anchors": [
+        "vote against",
+        "six weeks",
+        "NBC"
+      ],
+      "capture": null,
+      "attempts": [
+        {
+          "at": "2026-10-14T12:20:00+00:00",
+          "environment": "cloud development sandbox (network policy denies publisher hosts)",
+          "result": "connection_refused"
+        }
+      ]
+    },
+    {
+      "id": "U4",
+      "url": "https://rollcall.com/factbase/trump/transcript/donald-trump-interview-bryan-llenas-fox-news-august-30-2024/",
+      "publisher": "Roll Call Factbase",
+      "source_type": "primary_transcript",
+      "published": "2024-08-30",
+      "located_by": "user",
+      "relevant_to": [
+        "P2",
+        "P4"
+      ],
+      "anchors": [
+        "voting no",
+        "six weeks"
+      ],
+      "capture": null,
+      "attempts": [
+        {
+          "at": "2026-10-14T12:20:00+00:00",
+          "environment": "cloud development sandbox (network policy denies publisher hosts)",
+          "result": "dns_blocked"
+        }
+      ]
+    },
+    {
+      "id": "U1",
+      "url": "https://www-cdn.abcnews.com/Politics/harris-trump-presidential-debate-transcript/story?id=113560542",
+      "publisher": "ABC News",
+      "source_type": "primary_transcript",
+      "published": "2024-09-10",
+      "located_by": "user",
+      "relevant_to": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "anchors": [
+        "very next day",
+        "six-week"
+      ],
+      "capture": null,
+      "attempts": []
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "YouVerify AI",
+  "version": "0.1.0",
+  "description": "Fact-check a statement from the YouTube video you are watching, with cited evidence.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open YouVerify AI"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

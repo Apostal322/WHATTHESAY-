@@ -1,0 +1,336 @@
+{
+  "id": "en-debate-1200",
+  "video_url": "https://www.youtube.com/watch?v=VgsC_aBquUE",
+  "video_timestamp_sec": 1200,
+  "transcript_timestamp_note": "Two transcripts are known. (1) Roll Call Factbase's timestamped debate transcript (U5) attributes the statement to Linsey Davis at about 15:55-16:12 of its own timeline, according to the person who located it (2026-10-14); nobody on the project has opened it. (2) The ABC News transcript (U1) has no timestamps. Neither timeline has been mapped to the YouTube upload, which may start earlier or later (pre-show, cuts), so 15:55 must not be read as 15:55 of the video. The video position used here (1200 s, extraction window 1155-1210 s) comes from the evaluation case and is about 4 minutes later than the Factbase time.",
+  "speaker": "Linsey Davis (ABC News moderator), addressing Donald Trump",
+  "speaker_status": "corroborated_secondary",
+  "quote": "In your home state of Florida, you surprised many with regard to your six-week abortion ban because you initially had said that it was too short and you said quote I'm going to be voting that we need more than six weeks, but then the very next day you reversed course and said you would vote to support the six-week ban.",
+  "quote_status": "model_reported",
+  "claim": "Before the debate, Trump first said Florida's six-week abortion ban was too short and that he would vote that 'we need more than six weeks', and the very next day said he would vote to support the six-week ban.",
+  "context": "ABC News presidential debate, Philadelphia, 10 September 2024; a moderator's question to Donald Trump. The claim describes Trump's statements of late August 2024 about Florida's six-week abortion law and the November 2024 ballot measure Amendment 4. It must be judged on what was on record by 10 September 2024.",
+  "propositions": [
+    {
+      "id": "P1",
+      "text": "In late August 2024 Trump said Florida's six-week abortion limit was too short and that he would be 'voting that we need more than six weeks'.",
+      "kind": "attribution",
+      "reference_verdict": "supported",
+      "rationale": "Reported by several outlets from an NBC News interview (reported 29 August 2024). This is his position on the six-week LIMIT, a different act from his vote on Amendment 4 (P2). No primary transcript of the NBC interview is in the record.",
+      "primary_evidence": []
+    },
+    {
+      "id": "P2",
+      "text": "Trump then said he would vote against Florida's Amendment 4, the abortion-rights ballot measure.",
+      "kind": "attribution",
+      "reference_verdict": "supported",
+      "rationale": "Reported from a Fox News interview of 30 August 2024 ('I will be voting no'). U4 (Fox interview transcript) is the primary record and U2 (Reuters) the wire report; neither has been opened.",
+      "primary_evidence": [
+        "U4",
+        "U2"
+      ]
+    },
+    {
+      "id": "P3",
+      "text": "The second statement came 'the very next day' after the first.",
+      "kind": "temporal",
+      "reference_verdict": "supported",
+      "rationale": "29 August (NBC, reported) then 30 August (Fox) 2024. Both dates are publication dates from secondary reports (date_basis 'reported'); the NBC interview may have been recorded earlier. A search-tool summary of syndicated copies of the Reuters wire (not the Reuters page, which was not read) describes the NBC remark as coming 'earlier in the week': consistent with 'the very next day' but not confirmation of it. 'mixed' is acceptable if the system flags the recorded-vs-aired uncertainty.",
+      "temporal": {
+        "from_event": "E1",
+        "to_event": "E2",
+        "relation": "next_day"
+      },
+      "acceptable_verdicts": [
+        "supported",
+        "mixed"
+      ]
+    },
+    {
+      "id": "P4",
+      "text": "Saying he would vote against Amendment 4 amounts to saying he 'would vote to support the six-week ban'.",
+      "kind": "characterization",
+      "reference_verdict": "mixed",
+      "rationale": "A characterization, not a quotation. In effect yes (see P5), and some outlets headlined it as voting 'to uphold' the ban; but those are the outlets' words. Trump said he would vote no; his campaign reiterated that he believes six weeks is too short. A system that presents 'support the six-week ban' as Trump's own words has confused an interpretation with a quotation.",
+      "acceptable_verdicts": [
+        "mixed"
+      ],
+      "primary_evidence": [
+        "U4",
+        "U5"
+      ]
+    },
+    {
+      "id": "P5",
+      "text": "Amendment 4, if adopted, would have barred laws that prohibit, penalize, delay or restrict abortion before viability, so it would have made Florida's six-week law unenforceable; a vote against it is a vote to keep that law in force.",
+      "kind": "legal_effect",
+      "reference_verdict": "supported",
+      "acceptable_verdicts": [
+        "supported"
+      ],
+      "primary_evidence": [
+        "U3"
+      ],
+      "rationale": "The practical legal implication of a 'no' vote. U3, the Florida Department of State's record of the initiative, is the primary source for the amendment's text; it has NOT been opened by anyone on the project, so this reference rests on secondary summaries (R4 and search summaries of news coverage). An individual vote does not decide the outcome; the claim is about what voting no stands for, not what happened. Amendment 4 later failed (November 2024, below the 60% threshold): after the claim date, irrelevant to its accuracy."
+    }
+  ],
+  "evidence": [
+    {
+      "id": "U1",
+      "url": "https://www-cdn.abcnews.com/Politics/harris-trump-presidential-debate-transcript/story?id=113560542",
+      "publisher": "ABC News",
+      "published": "2024-09-10",
+      "provenance": "user_supplied",
+      "opened_by_reviewer": false,
+      "stances": {},
+      "note": "Debate transcript. Needed to verify the quote and speaker. Not reachable from the development environment.",
+      "source_type": "primary_transcript",
+      "located_by": "user",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "none"
+    },
+    {
+      "id": "U5",
+      "url": "https://rollcall.com/factbase/trump/transcript/donald-trump-debate-first-presidential-kamala-harris-philadelphia-september-10-2024",
+      "publisher": "Roll Call Factbase",
+      "published": "2024-09-10",
+      "provenance": "user_supplied",
+      "opened_by_reviewer": false,
+      "stances": {},
+      "note": "Timestamped debate transcript; primary record for the quote and speaker. Located by the user on 2026-10-14; not reachable from the development environment (DNS blocked), so the wording and the timestamps are unchecked. Its timeline is not the YouTube upload's (see transcript_timestamp_note).",
+      "source_type": "primary_transcript",
+      "located_by": "user",
+      "located_on": "2026-10-14",
+      "user_statement": "The relevant statement is attributed to Linsey Davis around 15:55-16:12 in this transcript.",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "none"
+    },
+    {
+      "id": "U2",
+      "url": "https://www.reuters.com/world/us/trump-says-hell-vote-against-florida-amendment-enshrining-abortion-rights-2024-08-30/",
+      "publisher": "Reuters",
+      "published": "2024-08-30",
+      "provenance": "user_supplied",
+      "opened_by_reviewer": false,
+      "stances": {},
+      "note": "Wire report on P2/P3. Re-supplied by the user on 2026-10-14. Not reachable from the development environment (fetch tool: refused; curl: blocked). A search-tool summary of syndicated copies of the wire was seen (P3 rationale); it is not a reading of the Reuters page. Stance not assessed.",
+      "source_type": "wire_report",
+      "located_by": "user",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "none",
+      "located_on": "2026-10-14",
+      "user_statement": "Reuters report that Trump said he will vote against the Florida amendment enshrining abortion rights."
+    },
+    {
+      "id": "U3",
+      "url": "https://constitutionalinitiatives.dos.fl.gov/Home/InitDetail?account=83927&seqnum=1",
+      "publisher": "Florida Department of State",
+      "published": null,
+      "provenance": "user_supplied",
+      "opened_by_reviewer": false,
+      "stances": {},
+      "note": "Primary source for what the amendment would do (P5) and hence for the characterization (P4). Re-supplied by the user on 2026-10-14. Not reachable from the development environment (DNS blocked). Stance not assessed. Context, not a verdict: the amendment's text says what a vote is about, not whether the moderator's wording was fair.",
+      "source_type": "official_record",
+      "located_by": "user",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "none",
+      "located_on": "2026-10-14",
+      "user_statement": "Official Florida Department of State record of Amendment 4 (initiative 23-07)."
+    },
+    {
+      "id": "U4",
+      "url": "https://rollcall.com/factbase/trump/transcript/donald-trump-interview-bryan-llenas-fox-news-august-30-2024/",
+      "publisher": "Roll Call Factbase",
+      "published": "2024-08-30",
+      "provenance": "user_supplied",
+      "opened_by_reviewer": false,
+      "stances": {},
+      "note": "Primary transcript of the Fox News interview (P2). Not reachable; stance not assessed.",
+      "source_type": "primary_transcript",
+      "located_by": "user",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "none"
+    },
+    {
+      "id": "R1",
+      "url": "https://www.axios.com/2024/08/29/trump-abortion-limit-too-short",
+      "publisher": "Axios",
+      "published": "2024-08-29",
+      "provenance": "reviewer_search_summary",
+      "opened_by_reviewer": false,
+      "stances": {
+        "P1": "supports"
+      },
+      "note": "Headline 'Trump: Six-week abortion limit is \"too short\"'.",
+      "source_type": "news_report",
+      "located_by": "ai_assistant_search",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "ai_interpretation_of_search_summary"
+    },
+    {
+      "id": "R2",
+      "url": "https://floridaphoenix.com/2024/08/29/donald-trump-says-floridas-6-week-abortion-law-is-too-short/",
+      "publisher": "Florida Phoenix",
+      "published": "2024-08-29",
+      "provenance": "reviewer_search_summary",
+      "opened_by_reviewer": false,
+      "stances": {
+        "P1": "supports"
+      },
+      "note": "Also republished by Louisiana Illuminator (same newsroom network): one origin.",
+      "source_type": "news_report",
+      "located_by": "ai_assistant_search",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "ai_interpretation_of_search_summary"
+    },
+    {
+      "id": "R3",
+      "url": "https://www.foxnews.com/politics/trump-opposes-floridas-amendment-4-which-offers-unfettered-abortion-access-its-radical",
+      "publisher": "Fox News",
+      "published": "2024-08-30",
+      "provenance": "reviewer_search_summary",
+      "opened_by_reviewer": false,
+      "stances": {
+        "P2": "supports"
+      },
+      "note": "Outlet that conducted the interview: 'Trump comes out against Florida abortion ballot measure'.",
+      "source_type": "news_report",
+      "located_by": "ai_assistant_search",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "ai_interpretation_of_search_summary"
+    },
+    {
+      "id": "R4",
+      "url": "https://www.catholicnewsagency.com/news/259037/trump-says-he-will-vote-no-on-florida-pro-abortion-amendment",
+      "publisher": "Catholic News Agency",
+      "published": "2024-08-30",
+      "provenance": "reviewer_search_summary",
+      "opened_by_reviewer": false,
+      "stances": {
+        "P1": "supports",
+        "P2": "supports",
+        "P3": "supports",
+        "P4": "partially_supports"
+      },
+      "note": "Summary: 'I will be voting no'; the earlier NBC remark called six weeks too short; the amendment would invalidate the six-week and 15-week laws. Syndicated by NC Register / EWTN: one origin.",
+      "source_type": "news_report",
+      "located_by": "ai_assistant_search",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "ai_interpretation_of_search_summary"
+    },
+    {
+      "id": "R5",
+      "url": "https://www.cbsnews.com/amp/news/trump-florida-abortion-ban-amendment-vote",
+      "publisher": "CBS News",
+      "published": "2024-08-30",
+      "provenance": "reviewer_search_summary",
+      "opened_by_reviewer": false,
+      "stances": {
+        "P2": "supports",
+        "P4": "partially_supports"
+      },
+      "note": "Headline frames the no vote as voting 'to uphold Florida's 6-week abortion ban': a press characterization, not Trump's words.",
+      "source_type": "news_report",
+      "located_by": "ai_assistant_search",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "ai_interpretation_of_search_summary"
+    },
+    {
+      "id": "R6",
+      "url": "https://www.oursundayvisitor.com/trump-calls-florida-6-week-abortion-ban-protecting-most-unborn-children-too-short/",
+      "publisher": "OSV News",
+      "published": "2024-08-30",
+      "provenance": "reviewer_search_summary",
+      "opened_by_reviewer": false,
+      "stances": {
+        "P1": "supports",
+        "P2": "supports",
+        "P4": "partially_supports"
+      },
+      "note": "Includes the campaign line that Trump 'simply reiterated that he believes six weeks is too short': cuts against reading the no vote as support for the ban itself.",
+      "source_type": "news_report",
+      "located_by": "ai_assistant_search",
+      "inspected_by_app": false,
+      "app_capture": null,
+      "human_approved": false,
+      "stance_basis": "ai_interpretation_of_search_summary"
+    }
+  ],
+  "reference_verdict": "supported",
+  "acceptable_verdicts": [
+    "supported",
+    "mixed"
+  ],
+  "verdict_rationale": "The checkable substance is supported: within about a day Trump went from saying six weeks was too short and he'd vote for more than six weeks (P1) to saying he'd vote against Amendment 4 (P2, P3). 'Said you would vote to support the six-week ban' (P4) is the moderator's characterization of the effect of a no vote. It is accurate in effect but not his wording, and he kept calling six weeks too short. 'supported' with that caveat is the reference. 'mixed', with an explanation separating effect from wording, is also defensible. 'contradicted' would be a false confident verdict; 'insufficient_evidence' would be a miss.",
+  "review": {
+    "reviewer": "Claude (AI assistant) for the project owner",
+    "reviewer_kind": "ai_assistant",
+    "status": "ai_reviewed",
+    "date": "2026-10-14",
+    "method": "Web-search result summaries (search tool) for the R* sources; their stances are an AI assistant's interpretation of those summaries (stance_basis). No page was opened by the reviewer or inspected by the application: the development environment's network policy denies every source host (2026-10-14 re-test: curl HTTP 000 / fetch tool DNS failure for rollcall.com, constitutionalinitiatives.dos.fl.gov and reuters.com). U2, U3 and U5 were located by the user, not read by anyone on the project.",
+    "open_items": [
+      "Open U5 (Roll Call Factbase) or U1 (ABC) and check the quote word for word and the speaker; record where 15:55-16:12 falls in the YouTube upload.",
+      "Run scripts/capture_evidence.py on a machine with web access, so the application inspects U2, U3 and U5 and keeps verbatim excerpts in eval/fixtures/en-debate-1200/.",
+      "Check U3's text for P5 (what Amendment 4 would have done).",
+      "Confirm the NBC interview date (recorded vs aired) for P3 (event E1).",
+      "A human reviewer signs off: set reviewer_kind to human, review.status to human_verified, and human_approved on each source they checked."
+    ]
+  },
+  "claim_date": "2024-09-10",
+  "events": [
+    {
+      "id": "E1",
+      "description": "Trump tells NBC News six weeks is too short ('voting that we need more than six weeks').",
+      "date": "2024-08-29",
+      "date_basis": "reported",
+      "evidence_ids": [
+        "R1",
+        "R2"
+      ],
+      "note": "Publication date of the reports; the recording date of the interview is not confirmed."
+    },
+    {
+      "id": "E2",
+      "description": "Trump tells Fox News he will vote no on Amendment 4.",
+      "date": "2024-08-30",
+      "date_basis": "reported",
+      "evidence_ids": [
+        "R3",
+        "R4",
+        "U2",
+        "U4"
+      ],
+      "note": "Date given by the reports and by the transcript URL (U4, unopened)."
+    },
+    {
+      "id": "E3",
+      "description": "ABC News debate: Linsey Davis puts the claim to Trump.",
+      "date": "2024-09-10",
+      "date_basis": "reported",
+      "evidence_ids": [
+        "U1",
+        "U5"
+      ],
+      "note": "The claim is judged as of this date."
+    }
+  ]
+}
