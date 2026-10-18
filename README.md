@@ -2,7 +2,9 @@
 
 # YouVerify AI
 
-**Fact-check what someone says in a YouTube video at the moment they say it, with sources you can open and an honest "not enough evidence" when that is the answer.**
+**Understand what's being said. Verify what matters.**
+
+An AI-powered Chrome extension that identifies claims in YouTube videos, retrieves relevant evidence, and helps users evaluate the reliability of information. A research prototype: its accuracy has not yet been measured.
 
 [![CI](https://github.com/Apostal322/WHATTHESAY-/actions/workflows/ci.yml/badge.svg)](https://github.com/Apostal322/WHATTHESAY-/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
@@ -55,7 +57,7 @@ overrule the model when the retrieved evidence does not justify its confidence.
 [Architecture](#architecture) · [ML / RAG pipeline](#the-ml--rag-pipeline) · [Tech stack](#technology-stack) ·
 [Status](#project-status-what-is-real) · [Installation](#installation) · [Usage](#usage) ·
 [Testing](#testing-and-quality) · [Evaluation](#evaluation-methodology) · [Security](#security-and-privacy) ·
-[Limitations](#known-limitations) · [Roadmap](#roadmap) · [Docs](#documentation)
+[Challenges](#engineering-challenges) · [Limitations](#known-limitations) · [Roadmap](#roadmap) · [Contributing](#contributing) · [Docs](#documentation)
 
 ## The problem
 
@@ -216,6 +218,27 @@ real provider), *verified with mocks* (automated tests with fake models or fixtu
 | Public deployment | ❌ Not ready: single-user local backend, no auth. See the blockers in [security & privacy](docs/security-privacy.md) |
 
 Full detail, including every live attempt and its failure: [live validation report](docs/live-validation-report.md).
+
+## Engineering challenges
+
+Real problems this project ran into, and what was done about each:
+
+- **Provider overload and quotas.** Live Gemini runs hit 503 overload and Google Search grounding
+  429 quota errors. Errors are classified (a daily quota is not retried in a loop; an overload can
+  fall back once to another model), a hard daily call cap bounds experiments, and the UI tells a
+  retrieval outage apart from "insufficient evidence". This is also why no live verdict exists yet.
+- **Who said what.** A journalist's summary of what a politician meant was being accepted as the
+  politician's own words. A deterministic safeguard now requires the speaker's own words (a
+  quotation or transcript line) before a claim about what someone said can be confirmed or refuted
+  ([report §7g](docs/live-validation-report.md#7g-attribution-safeguard-2026-10-14-no-api-calls)).
+- **Is the source real, and does it say that?** The model cannot add a URL; excerpts are labelled
+  by origin (verbatim page text, search snippet, model summary); quoted words are checked
+  verbatim; syndicated copies count as one source.
+- **Paying for work nobody sees.** Cancelled requests used to finish their model calls, and
+  duplicate clicks paid twice. Both were reproduced on a real server and fixed
+  ([defect register](docs/quality/defects.md)).
+- **Honest evaluation.** Answer keys record who checked what, and an AI reviewer cannot mark a
+  record human-verified, so model-written labels never pass as ground truth.
 
 ## Installation
 
@@ -401,6 +424,12 @@ docs/           architecture, API, development, evaluation, security, validation
 | [Feasibility study](docs/feasibility.md) | Timestamp-based extraction with Gemini: risks and measurements |
 | [Security and privacy](docs/security-privacy.md) | Data flow, threat model, public-beta blockers |
 | [Windows local validation](docs/windows-local-validation.md) | Step-by-step Windows setup, safe key entry, evidence capture |
+
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup,
+branch and pull-request workflow, and the checks CI runs. Report security issues privately as
+described in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## License
 

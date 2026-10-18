@@ -1,0 +1,21 @@
+name: Wrong or unjustified verdict
+description: A verdict, citation or extracted claim that the evidence does not support
+labels: [ml-quality]
+body:
+  - type: input
+    id: claim
+    attributes: {label: Claim checked}
+    validations: {required: true}
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong
+      options: [Wrong claim extracted, Wrong verdict, Source does not say what is cited, Wrong speaker or quotation, Outdated evidence, Other]
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes: {label: Evidence, description: "Links to primary sources showing the correct answer, and the verdict and sources YouVerify gave."}
+    validations: {required: true}
+  - type: input
+    id: video
+    attributes: {label: Video URL and timestamp (if from a video)}
