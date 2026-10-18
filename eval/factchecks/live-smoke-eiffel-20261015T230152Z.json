@@ -1,0 +1,65 @@
+{
+  "id": "live-smoke-eiffel",
+  "input_method": "manual",
+  "claim": "The Eiffel Tower was completed in 1889.",
+  "context": null,
+  "language": "en",
+  "video": null,
+  "extraction": null,
+  "run_meta": {
+    "run_at": "2026-10-15T23:01:52+00:00",
+    "verification_model": "gemini-3.8-flash",
+    "fallback_model": null,
+    "retrieval_backend": "gemini_grounding",
+    "max_retries": 0,
+    "prices": {
+      "input_per_M": null,
+      "output_per_M": null,
+      "search_per_1k": null
+    }
+  },
+  "latency_ms": 3369,
+  "verification": {
+    "error": "provider_quota_exhausted",
+    "message": "The Gemini API quota for this key has been exceeded (for example a free-tier daily or search-grounding limit). Try again later, or use a key with a higher quota.",
+    "diagnostics": {
+      "operation": "grounded_search",
+      "model": "gemini-3.8-flash",
+      "http_status": 429,
+      "provider_status": "RESOURCE_EXHAUSTED",
+      "provider_message": "You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. ",
+      "completed": {
+        "analysis": {
+          "normalized_claim": "The Eiffel Tower was completed in 1889.",
+          "claim_type": "factual",
+          "planned_queries": [
+            "Eiffel Tower completion date 1889",
+            "when was the Eiffel Tower built and completed"
+          ],
+          "scope_notes": "Refers to the architectural construction completion of the Eiffel Tower in Paris, France."
+        },
+        "retrieval": null,
+        "models_used": {
+          "analysis": "gemini-3.8-flash"
+        },
+        "usage": {
+          "prompt_tokens": 459,
+          "output_tokens": 284,
+          "total_tokens": 743,
+          "video_tokens": null,
+          "audio_tokens": null
+        }
+      }
+    }
+  },
+  "reference_score": null,
+  "review": {
+    "status": "unreviewed",
+    "reviewer": null,
+    "quote_checked_against_video_or_transcript": null,
+    "speaker_checked": null,
+    "sources_opened": null,
+    "verdict_agrees": null,
+    "notes": null
+  }
+}

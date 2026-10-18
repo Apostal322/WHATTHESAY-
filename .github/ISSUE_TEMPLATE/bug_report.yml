@@ -1,0 +1,20 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes: {label: What happened, description: "Include the error code shown in the side panel or API response."}
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes: {label: Steps to reproduce, description: Video URL and timestamp or the claim text, if relevant.}
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes: {label: Expected behaviour}
+  - type: input
+    id: version
+    attributes: {label: Commit or version, placeholder: e.g. main @ abc1234}
+  - type: markdown
+    attributes: {value: "Do not paste API keys, `.env` contents or private data. Security issues: see SECURITY.md."}

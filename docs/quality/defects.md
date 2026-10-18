@@ -1,0 +1,42 @@
+# Defect register (quality audit, 2026-10-15)
+
+Every defect below was reproduced before it was fixed. Its regression test lives in
+`backend/tests/test_hardening.py` (H-n) or `extension/test/`, unless another file is named.
+"Failed before" means the test was run against the code before the fix: `796fe74` for the
+first batch and `67cb677` for H-8 to H-10. Severity scale: **S1** wrong verdict or
+security/cost risk in normal use; **S2** wrong behaviour in a plausible edge case;
+**S3** hygiene.
+
+| ID | Sev | Area | Defect | Root cause | Fix | Regression test | Status |
+|---|---|---|---|---|---|---|---|
+| H-1 | S1 | Caching | "He said he would vote no" verified for one video reused the cached verdict for another speaker | Cache key = claim text + language + model + retriever; the context (who, when) given to both prompts was ignored | Key hashes claim, context, language, model, retriever and `VERIFICATION_POLICY_VERSION` | `test_h1_cached_verdict_is_not_reused_for_a_different_context` | Fixed |
+| H-2 | S1 | Prompt injection | `</UNTRUSTED>`, `< /untrusted>` or attributes passed through the escaping; page titles and domains went into the evaluator prompt unescaped, and a newline in a title could forge a `[S9]` source header | Exact-string replace of one tag; titles were treated as trusted | Case-, space- and attribute-tolerant escaping; titles and domains wrapped as untrusted data on one line | `test_h2_*` (7 cases) | Fixed |
+| H-3 | S2 | Retrieval | In search mode a failed query or unreadable result page was dropped silently; "pages were read" was reported when most could not be fetched | Partial failures had no user-visible channel | Notices ("1 of 2 searches failed", "N of M result pages could not be read"); accurate empty reason | `test_h3_*` (3) | Fixed |
+| H-4 | S1 | Resource exhaustion | The 16 KB body limit only checked `Content-Length`; a chunked body of any size was buffered before validation | Header-only check | ASGI middleware enforces the limit on the stream; it runs inside CORS, so the 413 stays readable | `test_h4_chunked_body_without_content_length_is_size_limited` | Fixed |
+| H-5 | S2 | Resource exhaustion | The rate limiter kept every client address forever | No eviction | Idle clients are purged once per window | `test_h5_rate_limiter_forgets_idle_clients` | Fixed |
+| H-6 | S3 | Links | `127.1`, `0177.0.0.1`, `0x7f.1` and `localhost.` passed the display-link check (fetching was already blocked) | `ipaddress` does not parse inet_aton forms | Numeric forms normalised with `inet_aton`; trailing dots stripped | `test_h6_*`; property test over 4 encodings | Fixed |
+| H-7 | S3 | Input | NUL, ESC and zero-width characters reached prompts and the UI; `true` and `"12"` were accepted as timestamps | Lax coercion; no character hygiene | Control and format characters removed from claim and context; strict numeric timestamps | `test_h7_*` | Fixed |
+| H-8 | S2 | Verdict quality | The evaluator was not told the current date, that a page which only mentions or debunks a claim is not support, or that later evidence cannot show an earlier statement was false | Missing prompt rules | Rules + date added | Contract test only: model compliance **not tested** | Mitigated |
+| H-9 | S1 | Cost | After the client disconnected (the extension's Cancel), `/extract` and `/verify` still finished their model call. Measured on a real uvicorn server | `BaseHTTPMiddleware` hid the disconnect from `Request.is_disconnected()`; non-streaming routes never checked it | Plain ASGI request middleware; routes cancel their work on disconnect | `test_h9_client_disconnect_cancels_the_model_call` (real server, 3 endpoints) | Fixed |
+| H-10 | S2 | Cost | Identical concurrent requests (double click, retry, two tabs) each paid for their own model calls | No in-flight deduplication | `SingleFlight`: one task per key, progress fanned out, cancelled when the last waiter leaves | `test_h10_*` (2) | Fixed |
+| H-11 | S2 | Cost / UI | A double click while the video position was still being read started two extractions | Guard only after an `await` | Synchronous in-flight guard | `races.test.tsx` (slow source) | Fixed |
+| H-12 | S1 | Safeguards | A source assessed both "contradicts" and "supports" backed a confident verdict (the last assessment won) | Duplicate assessments overwrote each other | Conflicting assessments make the source `unclear`, with a note | `test_h12_a_source_assessed_both_ways_counts_as_unclear` | Fixed |
+| H-13 | S3 | Escaping / dedupe | Found by property tests: an unclosed `<untrusted` fragment was not escaped; `canonical_url` was not idempotent for `/amp/amp` | Regex required `>`; single `/amp` strip | Fragment-level escaping; repeated `/amp` stripped | `test_h13_*`, `test_properties.py` | Fixed |
+| H-14 | S3 | Observability | Logs could not say which stage was slow or which safeguard fired; no request id across log lines | Not recorded | `request_id` on every line; `stage_ms`, cost and safeguards in `claim_verified`; cache-hit and coalescing events | `test_h14_*` | Fixed |
+| H-15 | S2 | Taxonomy | No rules for questions, hypotheticals, satire, compound claims with an unsupported cause, or health claims | Missing prompt rules | Rules added | Contract test only: compliance **not tested** | Mitigated |
+| H-16 | S2 | Accessibility | When the verdict arrived, the progress live region disappeared and nothing announced the result | Focus never moved | Focus moves to the verdict heading | `VerdictCard.test.tsx` | Fixed |
+| H-17 | S3 | API contract | `models_used` and `retrieval_backend` were missing from the TypeScript types | No automated contract check | Types updated; `tests/test_contract.py` compares TS and Pydantic | `test_contract.py` | Fixed |
+
+## Known limitations (not fixed)
+
+| ID | Sev | Description | Why not fixed | Evidence |
+|---|---|---|---|---|
+| L-1 | S1 | The attribution safeguard checks that the speaker's own words are present, not that they say what the claim says: a transcript line by the right speaker on another topic still passes if the model calls it supporting | Needs semantic entailment; lexical overlap would reject paraphrases and all cross-language evidence | Strict xfail `test_l1_speakers_own_words_on_another_topic_should_not_confirm` |
+| L-2 | S1 | A confident verdict may rest on one origin whose page was not read (a grounding summary or snippet); only a warning is shown | Policy decision: a prototype rule changed 5 existing outcomes, including default grounding mode; the precision/recall trade-off needs labelled data | `docs/quality/README.md` (policy decisions) |
+| L-3 | S2 | Extraction gives different claims and types for the same request | Single model call; candidate lists need labelled data to justify | `docs/live-validation-report.md` §3 |
+| L-4 | S2 | Extraction median 30.9 s (n=4) | Model latency; needs controlled experiments with live access | `docs/live-validation-report.md` §3.8 |
+| L-5 | S2 | Rate limits, caches, budgets and coalescing are per process | Deployment work | `docs/quality/devops-handoff.md` |
+| L-6 | S3 | Unhandled 500 responses carry no `X-Request-ID`, and their log line has no request id (the error handler runs outside the request middleware) | Low value; logged exception still identifies path and time | – |
+| L-7 | S3 | A joiner of a coalesced verification can miss one intermediate progress stage | Harmless: it still receives the final result | `backend/app/core/singleflight.py` |
+| L-8 | S3 | The Gemini SDK retries every 429, including an exhausted daily quota, up to `YOUVERIFY_MAX_RETRIES` times before classification | Bounded and unbilled; the SDK cannot tell quota kinds apart | `backend/app/services/llm.py` |
+| L-9 | P0 action | The exposed Gemini key is still valid (a live call succeeded on 2026-10-15) | Only the owner can rotate it | `eval/factchecks/live-smoke-eiffel-20261015T230152Z.json` |
