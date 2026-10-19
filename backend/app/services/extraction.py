@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 _CACHE_BUCKET_SEC = 3
 # Bump when the extraction prompt changes what a cached extraction would say.
 EXTRACTION_PROMPT_VERSION = "2026-10-19.2"
+FALLBACK_CACHE_TTL_SEC = 300
 
 
 def compute_window(
@@ -121,7 +122,9 @@ class ExtractionService:
             },
         )
         if self._cache is not None:
-            self._cache.set(cache_key, response)
+            # A fallback model's answer is kept briefly: the configured model is retried soon.
+            ttl = FALLBACK_CACHE_TTL_SEC if result.model != s.extraction_model else None
+            self._cache.set(cache_key, response, ttl_sec=ttl)
         return response
 
 

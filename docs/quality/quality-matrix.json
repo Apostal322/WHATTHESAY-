@@ -1023,15 +1023,35 @@
       "priority": "P1",
       "status": "PASS",
       "validation": "unit",
-      "requirement": "A verdict reached while retrieval partly failed is not reused; a no-evidence verdict is re-checked within minutes",
-      "implementation": "RetrievalResult.degraded; TTLCache per-entry TTL (H-20)",
-      "test": "3 cases; 2 failed before the fix",
+      "requirement": "Results with a failed step (search, page fetch, upstream engine, semantic check) are never reused; no-evidence and fallback-model results expire within minutes; failed retrievals are not cached",
+      "implementation": "RetrievalResult.degraded (incl. SearXNG degraded engines), semantic_check_failed, per-entry TTL (H-20, H-28, H-29)",
+      "test": "Complete vs partial vs empty vs failed retrieval; fallback model (verification, extraction); search-level cache; 4 of these failed before their fixes",
       "observed": "Pass",
       "evidence": [
         "backend/tests/test_hardening2.py::test_h20_result_from_partly_failed_search_is_not_cached",
-        "backend/tests/test_hardening2.py::test_h20_no_evidence_result_expires_quickly"
+        "backend/tests/test_hardening2.py::test_h28_failed_upstream_engines_mark_retrieval_degraded_and_skip_caches",
+        "backend/tests/test_hardening2.py::test_h29_verification_served_by_fallback_model_expires_quickly",
+        "backend/tests/test_hardening2.py::test_cache_a_failed_retrieval_is_never_cached"
       ],
-      "limitation": "Grounding mode reports no partial failure, so its results are never marked degraded",
+      "limitation": "Grounding mode reports no partial failure (a failure raises), so its results are never marked degraded",
+      "owner": "Backend"
+    },
+    {
+      "id": "caching.invalidation",
+      "area": "caching",
+      "priority": "P1",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "Changing the model, verification policy, semantic checker, extraction settings or temporal context never serves an incompatible cached result; concurrent requests are coalesced only when identical",
+      "implementation": "Cache and SingleFlight share one key: claim, context, reconciled dates, language, model, retriever+checker, policy version",
+      "test": "Model, policy, checker changes miss; equivalent date contexts hit; different dates not coalesced",
+      "observed": "Pass",
+      "evidence": [
+        "backend/tests/test_hardening2.py::test_cache_is_invalidated_by_model_policy_and_checker",
+        "backend/tests/test_hardening2.py::test_concurrent_requests_with_different_dates_are_not_coalesced",
+        "backend/tests/test_temporal.py::test_cache_separates_temporal_contexts_and_merges_equivalent_ones"
+      ],
+      "limitation": "Caches are per process (L-5)",
       "owner": "Backend"
     },
     {

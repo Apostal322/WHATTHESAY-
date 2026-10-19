@@ -50,6 +50,9 @@ ProgressCallback = Callable[[Stage], Awaitable[None]]
 NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
 # "Nothing found" may be a passing gap (an index lag, a short outage upstream): re-check soon.
 NO_EVIDENCE_CACHE_TTL_SEC = 300
+# Served by the fallback model because the configured one was overloaded: retry the configured
+# model soon rather than serving the stand-in's answer for the full TTL.
+FALLBACK_CACHE_TTL_SEC = 300
 # Bump when prompts or verdict safeguards change what a cached response would say.
 VERIFICATION_POLICY_VERSION = "2026-10-19.4"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
@@ -334,6 +337,8 @@ class VerificationService:
                     pass  # a step failed, so the result is incomplete: never reuse it
                 elif retrieval is not None and not resp.sources:
                     self._cache.set(cache_key, resp, ttl_sec=NO_EVIDENCE_CACHE_TTL_SEC)
+                elif any(m != model for m in resp.models_used.values()):
+                    self._cache.set(cache_key, resp, ttl_sec=FALLBACK_CACHE_TTL_SEC)
                 else:
                     self._cache.set(cache_key, resp)
             return resp

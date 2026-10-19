@@ -146,7 +146,9 @@ class SearchRetriever:
         if self._cache is not None and (hit := self._cache.get(key)) is not None:
             return hit, True
         outcome = await self._search.search(query, language=language, max_results=self._per_query)
-        if self._cache is not None and outcome.response is not None:
+        # Results from a meta-search whose upstream engines partly failed are incomplete.
+        complete = outcome.response is not None and not outcome.response.degraded_engines
+        if self._cache is not None and complete:
             self._cache.set(key, outcome)
         return outcome, False
 
@@ -283,6 +285,11 @@ class SearchRetriever:
                 f"{unread} of {len(ranked)} result pages could not be read; search snippets "
                 "were used where available."
             )
+        if degraded and hits:
+            notices.append(
+                f"Some search engines did not respond ({', '.join(sorted(degraded))}); the "
+                "evidence may be incomplete."
+            )
         return RetrievalResult(
             sources=dedupe_and_number(sources),
             executed_queries=list(hits),
@@ -291,7 +298,7 @@ class SearchRetriever:
             search_cost_usd=round(cost, 6) if cost is not None else None,
             empty_reason=empty,
             notices=notices,
-            degraded=bool(failed_queries or unread),
+            degraded=bool(failed_queries or unread or degraded),
             diagnostics={
                 "searches": attempts,
                 "ranked": [
