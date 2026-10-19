@@ -193,6 +193,34 @@ class VerdictAdjustment(BaseModel):
     reason: str
 
 
+class CheckedPassage(BaseModel):
+    id: str = Field(description="P1, P2...: as shown to the entailment check.")
+    source_id: str
+    text: str = Field(description="The excerpt text the check judged (verbatim from the source).")
+    speaker_is_named: bool | None = Field(
+        description="Model judgment: these are the named person's words. None if not judged."
+    )
+
+
+class CheckedPart(BaseModel):
+    text: str = Field(description="Model-written: one assertion the claim makes.")
+    relations: dict[str, Literal["entails", "contradicts", "neutral"]] = Field(
+        description="Model judgment per passage id."
+    )
+
+
+class AttributionCheck(BaseModel):
+    """What the entailment check saw and judged, for human review. Model judgments throughout."""
+
+    status: Literal["confirmed", "not_confirmed", "failed"]
+    checker: str
+    passages: list[CheckedPassage]
+    parts: list[CheckedPart] = Field(default_factory=list)
+    failure: str | None = Field(
+        default=None, description="Why the check could not be completed (status failed)."
+    )
+
+
 class VerifyResponse(BaseModel):
     claim: str
     normalized_claim: str
@@ -213,6 +241,11 @@ class VerifyResponse(BaseModel):
         default_factory=list,
         description="Safeguards that changed the verdict, in order. Empty when the model's "
         "verdict stood; guardrail_notes may still carry warnings.",
+    )
+    attribution_check: AttributionCheck | None = Field(
+        default=None,
+        description="Present only when the entailment check ran (a claim about what someone "
+        "said that reached a confident verdict after the deterministic checks).",
     )
     model: str
     models_used: dict[str, str] = Field(

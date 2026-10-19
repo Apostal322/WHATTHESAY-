@@ -410,3 +410,127 @@ async def test_h24_russian_claim_confirmed_by_russian_transcript(settings: Setti
         speaker="Иванов",
     )
     assert resp.verdict == "supported" and resp.verdict_adjustments == []
+
+
+# ----------------------- H-30: an incomplete answer is a failed check, never a verdict
+
+
+def _answer(speakers: list[str], parts: list[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "speakers": [{"passage_id": p, "speaker_is_named": True} for p in speakers],
+        "parts": [
+            {
+                "text": f"part {k}",
+                "relations": [{"passage_id": p, "relation": r} for p, r in rel.items()],
+            }
+            for k, rel in enumerate(parts, 1)
+        ],
+    }
+
+
+COMPOUND = "Senator Jane Doe said she would vote to keep the ban and cut the budget by half."
+
+
+@pytest.mark.parametrize(
+    ("answer", "failure"),
+    [
+        # Failed before: part 2 was judged for no passage, and the result was "mixed".
+        (_answer(["P1"], [{"P1": "entails"}, {}]), "incomplete_output:relations"),
+        # Failed before: parts beyond 6 were dropped, and the 7th (neutral) gave "supported".
+        (_answer(["P1"], [{"P1": "entails"}] * 6 + [{"P1": "neutral"}]), "too_many_parts:7"),
+        (_answer([], [{"P1": "entails"}]), "incomplete_output:speakers"),
+        (_answer(["P1"], []), "incomplete_output:no_parts"),
+    ],
+)
+async def test_h30_incomplete_entailment_answer_is_a_failed_check(
+    settings: Settings, answer: dict[str, Any], failure: str
+) -> None:
+    cache = TTLCache[VerifyResponse](3600, 10)
+    resp, _ = await run(
+        settings, COMPOUND, [src("S1", "DOE: I will vote to keep the ban.")], "supported", answer,
+        cache=cache,
+    )  # fmt: skip
+    assert resp.verdict == "insufficient_evidence"  # uncertain: not mixed, not supported
+    assert "could not be completed" in resp.verdict_adjustments[0].reason
+    assert resp.attribution_check is not None
+    assert (resp.attribution_check.status, resp.attribution_check.failure) == ("failed", failure)
+    assert len(cache) == 0
+
+
+async def test_attribution_check_report_preserves_what_was_judged(settings: Settings) -> None:
+    resp, _ = await run(
+        settings,
+        KEEP_BAN,
+        [src("S1", "MODERATOR: Taxes? DOE: I will vote to raise taxes next year.")],
+        "supported",
+        judge_passages("neutral"),
+    )
+    report = resp.attribution_check
+    assert report is not None and report.status == "not_confirmed" and report.checker == "model"
+    (p,) = report.passages
+    assert (p.id, p.source_id, p.speaker_is_named) == ("P1", "S1", True)
+    assert p.text == "MODERATOR: Taxes? DOE: I will vote to raise taxes next year."
+    assert report.parts[0].relations == {"P1": "neutral"}
+
+
+async def test_no_attribution_check_report_when_the_stage_did_not_run(settings: Settings) -> None:
+    resp, _ = await run(
+        settings, KEEP_BAN, [src("S1", "Doe backs the ban, aides say.")], "supported", None
+    )
+    assert resp.attribution_check is None  # identity failed first: no semantic check needed
+
+
+# ------------------- quotation authenticity (the words exist) is not relevance (she said it)
+
+
+async def test_authentic_words_inside_a_denial_do_not_confirm(settings: Settings) -> None:
+    """Verbatim, in her own transcript line, yet she did not say it as her statement."""
+    resp, llm = await run(
+        settings,
+        'Senator Jane Doe said "we will raise taxes next year".',
+        [src("S1", 'DOE: I never said "we will raise taxes next year", and I never will.')],
+        "supported",
+        judge_passages("neutral"),  # what the corrected rule asks a reader to answer
+    )
+    assert resp.verdict == "insufficient_evidence"
+    assert rules(resp) == ["attribution_not_entailed"]  # authenticity passed; relevance did not
+    assert entailment_calls(llm)  # the semantic check, not the verbatim match, decided
+
+
+async def test_authentic_words_in_someone_elses_sentence_do_not_confirm(
+    settings: Settings,
+) -> None:
+    resp, _ = await run(
+        settings,
+        'Senator Jane Doe said "we will raise taxes next year".',
+        [
+            src(
+                "S1",
+                'Critics claim Doe said "we will raise taxes next year". DOE: I will protect '
+                "the parks.",
+            )
+        ],
+        "supported",
+        judge_passages("neutral"),
+    )
+    assert resp.verdict == "insufficient_evidence"
+
+
+async def test_a_relevant_paraphrase_never_stands_in_for_an_exact_quote(
+    settings: Settings,
+) -> None:
+    """Relevance is not authenticity: quoted words must be found, whatever the meaning."""
+    resp, llm = await run(
+        settings,
+        'Senator Jane Doe said "we will close every library by June".',
+        [src("S1", "DOE: We will be shutting all the libraries before the summer.")],
+        "supported",
+        judge_passages("entails"),  # would say yes to the meaning; it is never asked
+    )
+    assert rules(resp) == ["exact_quote_not_confirmed"]
+    assert entailment_calls(llm) == []
+
+
+def test_the_entailment_rules_separate_finding_words_from_saying_them() -> None:
+    assert "Finding the words is not the same as the person saying them" in ENTAILMENT_SYSTEM
+    assert 'denial ("I never said' in ENTAILMENT_SYSTEM

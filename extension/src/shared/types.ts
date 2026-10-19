@@ -82,6 +82,16 @@ export interface KeyFinding {
 }
 
 /** A deterministic safeguard that changed the model's verdict (unlike a guardrail note, a warning). */
+export type EntailmentRelation = "entails" | "contradicts" | "neutral";
+
+export interface AttributionCheck {
+  status: "confirmed" | "not_confirmed" | "failed";
+  checker: string;
+  passages: { id: string; source_id: string; text: string; speaker_is_named: boolean | null }[];
+  parts: { text: string; relations: Record<string, EntailmentRelation> }[];
+  failure: string | null;
+}
+
 export interface VerdictAdjustment {
   rule:
     | "verdict_without_backing_source"
@@ -108,6 +118,8 @@ export interface VerifyResponse {
   guardrail_notes: string[];
   /** Absent from older backends. */
   verdict_adjustments?: VerdictAdjustment[];
+  /** Present only when the entailment check ran. Model judgments, for human review. */
+  attribution_check?: AttributionCheck | null;
   /** Model that served each step (analysis, retrieval, evaluation); absent from older backends. */
   models_used?: Record<string, string>;
   model: string;

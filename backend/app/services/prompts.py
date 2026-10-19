@@ -208,10 +208,12 @@ date or position on the same point).
 part; a question; a hypothetical or conditional ("if..."); sarcasm; quoting or describing \
 someone else's view; a statement about a different time than the part specifies. When unsure, \
 choose neutral.
-- If the claim quotes exact words (in quotation marks), that part is about the words: entails \
-means the person spoke or wrote them (in another language: a faithful translation of them). \
-Whether they mislead out of context is judged elsewhere. For a paraphrase, the person's own \
-assertion is what counts: describing or quoting someone else's view is neutral."""
+- Finding the words is not the same as the person saying them. If the claim quotes exact words \
+(in quotation marks), entails means the person said or wrote those words (in another language: \
+a faithful translation) as their own statement. The same words inside a denial ("I never said \
+..."), a question, a hypothetical, or a quotation or description of someone else's words or plan \
+are neutral: they appear, but the person did not say them in the claim's sense. For a paraphrase, \
+likewise, only the person's own assertion counts."""
 
 
 def entailment_prompt(

@@ -614,11 +614,10 @@
       "validation": "mocked-integration",
       "requirement": "A verdict cannot contradict the evaluation's own evidence-backed findings",
       "implementation": "verdict_contradicts_own_findings (H-18)",
-      "test": "13 end-to-end scenarios; 2 failed before the fix",
+      "test": "13 end-to-end scenarios; the unsupported-cause case failed before the fix",
       "observed": "Pass",
       "evidence": [
-        "backend/tests/test_scenarios.py::test_true_fact_with_unsupported_cause",
-        "backend/tests/test_scenarios.py::test_correct_quote_with_misleading_context"
+        "backend/tests/test_scenarios.py::test_true_fact_with_unsupported_cause"
       ],
       "limitation": "Relies on the model stating the contradicting finding; a silent omission is not caught",
       "owner": "AI/ML"

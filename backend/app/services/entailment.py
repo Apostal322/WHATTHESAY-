@@ -15,6 +15,7 @@ development environment. `EntailmentChecker` is the seam for adding and comparin
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from app.core.errors import AppError
@@ -27,13 +28,19 @@ from app.services.structured import clip, parse_model_json
 MAX_PARTS = 6
 
 
+@dataclass(frozen=True)
+class EntailmentResult:
+    judgments: Judgments | None  # None: the check could not be completed
+    usage: Usage
+    model: str | None
+    failure: str | None = None  # why it could not be completed (no model text, no secrets)
+
+
 class EntailmentChecker(Protocol):
     name: str
 
-    async def judge(
-        self, claim: str, speaker: str, check: AttributionCheck
-    ) -> tuple[Judgments | None, Usage, str | None]:
-        """Judgments, or None if the check could not run; usage; model used."""
+    async def judge(self, claim: str, speaker: str, check: AttributionCheck) -> EntailmentResult:
+        """Judge every passage for every claim part; a partial answer is a failed check."""
         ...
 
 
@@ -44,9 +51,7 @@ class ModelEntailmentChecker:
         self._llm = llm
         self._model = model
 
-    async def judge(
-        self, claim: str, speaker: str, check: AttributionCheck
-    ) -> tuple[Judgments | None, Usage, str | None]:
+    async def judge(self, claim: str, speaker: str, check: AttributionCheck) -> EntailmentResult:
         try:
             res = await self._llm.generate_json(
                 model=self._model,
@@ -59,26 +64,46 @@ class ModelEntailmentChecker:
                 ),
                 schema=EntailmentOutput,
             )
-        except AppError:
-            return None, Usage(), None
+        except AppError as exc:
+            return EntailmentResult(None, Usage(), None, f"provider_error:{exc.code}")
         try:
             out = parse_model_json(res.text, EntailmentOutput)
         except AppError:
-            return None, res.usage, res.model
-        known = {p.id for p in check.passages}
-        speakers: dict[str, bool] = {}
-        for sp in out.speakers:
-            if sp.passage_id in known:
-                # Judged twice and differently: not established that it is the named speaker.
-                speakers[sp.passage_id] = speakers.get(sp.passage_id, sp.speaker_is_named) and (
-                    sp.speaker_is_named
-                )
-        parts: list[tuple[str, dict[str, Relation]]] = []
-        for part in out.parts[:MAX_PARTS]:
-            relations: dict[str, Relation] = {}
-            for r in part.relations:
-                if r.passage_id in known:
-                    previous = relations.get(r.passage_id, r.relation)
-                    relations[r.passage_id] = r.relation if previous == r.relation else "neutral"
-            parts.append((clip(part.text, 300) or "", relations))
-        return Judgments(speakers, tuple(parts)), res.usage, res.model
+            return EntailmentResult(None, res.usage, res.model, "malformed_output")
+        judgments, failure = _complete_judgments(out, [p.id for p in check.passages])
+        return EntailmentResult(judgments, res.usage, res.model, failure)
+
+
+def _complete_judgments(
+    out: EntailmentOutput, passage_ids: list[str]
+) -> tuple[Judgments | None, str | None]:
+    """Accept only a complete answer: anything missing could hide an unconfirmed part.
+
+    Every passage needs a speaker judgment, every part a relation for every passage, and the
+    claim 1 to MAX_PARTS parts (more are not dropped: the check fails instead). A passage or
+    relation judged twice, differently, is taken as "not established" (not named, neutral).
+    """
+    known = set(passage_ids)
+    speakers: dict[str, bool] = {}
+    for sp in out.speakers:
+        if sp.passage_id in known:
+            speakers[sp.passage_id] = speakers.get(sp.passage_id, sp.speaker_is_named) and (
+                sp.speaker_is_named
+            )
+    if set(speakers) != known:
+        return None, "incomplete_output:speakers"
+    if not out.parts:
+        return None, "incomplete_output:no_parts"
+    if len(out.parts) > MAX_PARTS:
+        return None, f"too_many_parts:{len(out.parts)}"
+    parts: list[tuple[str, dict[str, Relation]]] = []
+    for part in out.parts:
+        relations: dict[str, Relation] = {}
+        for r in part.relations:
+            if r.passage_id in known:
+                previous = relations.get(r.passage_id, r.relation)
+                relations[r.passage_id] = r.relation if previous == r.relation else "neutral"
+        if set(relations) != known:
+            return None, "incomplete_output:relations"
+        parts.append((clip(part.text, 300) or "", relations))
+    return Judgments(speakers, tuple(parts)), None

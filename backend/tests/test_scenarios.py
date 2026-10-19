@@ -117,7 +117,11 @@ async def test_fabricated_quotation(settings: Settings) -> None:
 
 
 async def test_correct_quote_with_misleading_context(settings: Settings) -> None:
-    """The quote is real, but the model's own finding says the context reverses its meaning."""
+    """The quote is real, but she was describing the opposition's plan, not stating her own.
+
+    The words are authentic (found verbatim, in her transcript line), but she did not say them
+    as her own statement, so they do not confirm the attribution: no confident verdict.
+    """
     page = (
         'Doe said: "taxes will rise next year" and immediately added that this was the '
         "opposition plan she would vote against."
@@ -139,11 +143,11 @@ async def test_correct_quote_with_misleading_context(settings: Settings) -> None
                 ("She was describing a plan she opposed [S2].", "contradicts", ["S2"]),
             ],
         ),
-        # She did speak these words: the quote-claim is entailed; the context is the finding's job.
-        entailment=judge_passages("entails"),
+        # A correct reader: the words appear, but as a description of someone else's plan.
+        entailment=judge_passages("neutral"),
     )
-    assert resp.verdict == "mixed"
-    assert rules(resp) == ["verdict_contradicts_own_findings"]
+    assert resp.verdict == "insufficient_evidence"
+    assert rules(resp) == ["attribution_not_entailed"]
 
 
 async def test_syndicated_copies_do_not_confirm_a_quote(settings: Settings) -> None:

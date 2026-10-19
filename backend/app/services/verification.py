@@ -18,7 +18,10 @@ from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.singleflight import SingleFlight
 from app.models.llm_outputs import ClaimAnalysisOutput, EvaluationOutput
+from app.models.schemas import AttributionCheck as AttributionCheckReport
 from app.models.schemas import (
+    CheckedPart,
+    CheckedPassage,
     ClaimType,
     KeyFinding,
     SourceRef,
@@ -29,13 +32,14 @@ from app.models.schemas import (
     VerifyResponse,
 )
 from app.services import prompts
+from app.services.attribution import AttributionCheck as EvidenceCheck
 from app.services.attribution import (
     apply_entailment,
     check_attribution_evidence,
     detect_attribution,
 )
 from app.services.citations import EvidenceSource, format_sources_for_prompt
-from app.services.entailment import EntailmentChecker, ModelEntailmentChecker
+from app.services.entailment import EntailmentChecker, EntailmentResult, ModelEntailmentChecker
 from app.services.evidence import origin_groups
 from app.services.llm import LLMClient, Usage
 from app.services.retrieval import GeminiGroundingRetriever, RetrievalResult, Retriever
@@ -54,7 +58,7 @@ NO_EVIDENCE_CACHE_TTL_SEC = 300
 # model soon rather than serving the stand-in's answer for the full TTL.
 FALLBACK_CACHE_TTL_SEC = 300
 # Bump when prompts or verdict safeguards change what a cached response would say.
-VERIFICATION_POLICY_VERSION = "2026-10-19.4"
+VERIFICATION_POLICY_VERSION = "2026-10-19.5"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 # Text between straight or curly double quotes; single quotes are too often apostrophes.
@@ -216,6 +220,27 @@ def verification_cache_key(req: VerifyRequest, model: str, retriever: str) -> st
         VERIFICATION_POLICY_VERSION,
     ]
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
+
+
+def _attribution_report(
+    check: EvidenceCheck, result: EntailmentResult, checker: str, confirmed: bool
+) -> AttributionCheckReport:
+    j = result.judgments
+    return AttributionCheckReport(
+        status="failed" if j is None else "confirmed" if confirmed else "not_confirmed",
+        checker=checker,
+        passages=[
+            CheckedPassage(
+                id=p.id,
+                source_id=p.source.id,
+                text=p.text,
+                speaker_is_named=j.speaker_is_named.get(p.id) if j else None,
+            )
+            for p in check.passages
+        ],
+        parts=[CheckedPart(text=t, relations=dict(r)) for t, r in j.parts] if j else [],
+        failure=result.failure,
+    )
 
 
 # --------------------------------------------------------------------- service
@@ -485,18 +510,20 @@ class VerificationService:
         attribution = detect_attribution(req.claim, analysis.attributed_to, analysis.exact_words)
         check = check_attribution_evidence(verdict, stances, by_id, attribution)
         verdict, attribution_change = check.verdict, check.adjustment
+        attribution_report: AttributionCheckReport | None = None
         if check.passages:
-            judgments, used, judged_by = await self._entailment.judge(
-                req.claim, attribution.speaker, check
-            )
-            usage += used
-            if judged_by:
-                models_used["entailment"] = judged_by
-            semantic_check_failed = judgments is None
+            result = await self._entailment.judge(req.claim, attribution.speaker, check)
+            usage += result.usage
+            if result.model:
+                models_used["entailment"] = result.model
+            semantic_check_failed = result.judgments is None
             if semantic_check_failed:
                 notes.append("The check of the speaker's own words could not be completed.")
             verdict, attribution_change = apply_entailment(
-                check, judgments, by_id, attribution.speaker
+                check, result.judgments, by_id, attribution.speaker
+            )
+            attribution_report = _attribution_report(
+                check, result, self._entailment.name, attribution_change is None
             )
             mark = lap("entailment", mark)
         if attribution_change is not None:
@@ -613,4 +640,5 @@ class VerificationService:
             independent_source_count=independent_domains(stances, by_id),
             guardrail_notes=notes,
             verdict_adjustments=adjustments,
+            attribution_check=attribution_report,
         )
