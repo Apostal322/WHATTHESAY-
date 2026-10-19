@@ -56,12 +56,18 @@ def test_summarize() -> None:
             ground_truth_claim="a b c",
             claim_type="factual",
             reference_verdict="contradicted",
+            review_status="human_verified",
+            reviewed_by="reviewer-a",
+            reviewed_on="2026-10-19",
         ),
         EvalItem(
             id="2",
             ground_truth_claim="d e f",
             claim_type="opinion",
             reference_verdict="not_verifiable",
+            review_status="human_verified",
+            reviewed_by="reviewer-a",
+            reviewed_on="2026-10-19",
         ),
     ]
     records = [
@@ -84,13 +90,35 @@ def test_summarize() -> None:
         ),
     ]
     s = summarize(items, records)
-    assert s["extraction"]["claim_match_rate@f1>=0.5"] == 0.5  # type: ignore[index]
-    assert s["extraction"]["claim_type_accuracy"] == 0.5  # type: ignore[index]
+    h = s["human_verified"]
+    assert h["items"] == 2  # type: ignore[index]
+    assert h["claim_match_rate@f1>=0.5"] == 0.5  # type: ignore[index]
+    assert h["claim_type_accuracy"] == 0.5  # type: ignore[index]
+    assert h["verdict_accuracy"] == 0.5  # type: ignore[index]
+    assert h["false_confident_rate"] == 0.5  # type: ignore[index]
     v = s["verification"]
-    assert v["verdict_accuracy"] == 0.5  # type: ignore[index]
-    assert v["false_confident_rate"] == 0.5  # type: ignore[index]
     assert v["citation_validity"] == 1.0  # type: ignore[index]
     assert v["relevant_source_fraction"] == 0.5  # type: ignore[index]
+
+
+def test_unreviewed_labels_never_produce_an_accuracy() -> None:
+    items = [EvalItem(id="1", ground_truth_claim="a", claim_type="factual",
+                      reference_verdict="supported")]  # fmt: skip
+    records = [EvalRecord(id="1", predicted_verdict="supported")]
+    s = summarize(items, records)
+    assert s["human_verified"]["items"] == 0  # type: ignore[index]
+    assert s["human_verified"]["verdict_accuracy"] is None  # type: ignore[index]
+    assert "verdict_accuracy" not in s["verification"]  # type: ignore[operator]
+    assert s["provisional_unreviewed_labels"]["verdict_accuracy"] == 1.0  # type: ignore[index]
+
+
+def test_human_verified_requires_reviewer_and_date() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        EvalItem(id="1", ground_truth_claim="a", claim_type="factual",
+                 reference_verdict="supported", review_status="human_verified")  # fmt: skip
 
 
 def test_example_dataset_is_valid() -> None:

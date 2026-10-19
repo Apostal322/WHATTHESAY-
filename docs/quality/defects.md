@@ -26,6 +26,8 @@ security/cost risk in normal use; **S2** wrong behaviour in a plausible edge cas
 | H-15 | S2 | Taxonomy | No rules for questions, hypotheticals, satire, compound claims with an unsupported cause, or health claims | Missing prompt rules | Rules added | Contract test only: compliance **not tested** | Mitigated |
 | H-16 | S2 | Accessibility | When the verdict arrived, the progress live region disappeared and nothing announced the result | Focus never moved | Focus moves to the verdict heading | `VerdictCard.test.tsx` | Fixed |
 | H-17 | S3 | API contract | `models_used` and `retrieval_backend` were missing from the TypeScript types | No automated contract check | Types updated; `tests/test_contract.py` compares TS and Pydantic | `test_contract.py` | Fixed |
+| H-18 | S1 | Safeguards | The model could answer "supported" while its own evidence-backed finding said part of the claim was false (a true fact with an unsupported cause; a real quote in misleading context) | Verdict and findings were not cross-checked | New rule `verdict_contradicts_own_findings`: such a verdict becomes `mixed`, recorded in `verdict_adjustments` | `tests/test_scenarios.py` (2 cases failed before the fix) | Fixed |
+| H-19 | S1 | Evaluation | `run_eval.py` computed verdict accuracy from any dataset file, so unreviewed or model-written labels could produce an "accuracy" | No review status on dataset items | `EvalItem` records `review_status`, `reviewed_by`, `reviewed_on`; accuracy only over human-verified items, the rest reported as provisional; annotation cases keep machine proposals apart from human labels | `test_eval_metrics.py`, `test_annotation.py` | Fixed |
 
 ## Known limitations (not fixed)
 

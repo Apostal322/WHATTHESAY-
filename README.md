@@ -419,6 +419,8 @@ docs/           architecture, API, development, evaluation, security, validation
 | [Development guide](docs/development.md) | Commands, repository layout, manual test plan, troubleshooting provider errors |
 | [Retrieval architecture](docs/retrieval-architecture.md) | Retrievers, search providers, independence, outage semantics, paid-search policy |
 | [Evaluation protocol](docs/evaluation.md) | Datasets, metrics, reference records, offline fixtures |
+| [First live fact-check (owner procedure)](docs/beta-validation-windows.md) | Rotate the key, check reachability, run two bounded manual-claim fact-checks, review, then try the extension on YouTube |
+| [Annotation guide](docs/annotation-guide.md) | Turning real video moments into human-verified evaluation labels |
 | [Quality audit](docs/quality/README.md) | Quality matrix (PASS / FAIL / BLOCKED per requirement), defect register, release readiness, DevOps handoff, store checklist |
 | [Live validation report](docs/live-validation-report.md) | Every live run, failure diagnosis, audit findings, the attribution safeguard |
 | [Feasibility study](docs/feasibility.md) | Timestamp-based extraction with Gemini: risks and measurements |

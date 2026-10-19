@@ -17,6 +17,10 @@ Required for a shared deployment, beyond the local defaults:
 | `YOUVERIFY_SEARCH_DAILY_BUDGET_USD`, `YOUVERIFY_PRICE_PER_1K_BRAVE` | Required by the app before any paid search provider is used |
 | `YOUVERIFY_LOG_LEVEL` | `INFO` in production; logs carry no claim text and no secrets |
 
+Before any deployment test, run `python scripts/diagnose_env.py` on the target host: it shows
+which providers, publishers and YouTube are reachable and whether keys are set (as fingerprints
+only), without sending credentials. `--live` adds at most three bounded authenticated calls.
+
 ## 2. Network and transport
 
 - **HTTPS** in front of the API. The extension's `host_permissions` and `VITE_BACKEND_URL` must
