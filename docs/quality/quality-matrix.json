@@ -1000,6 +1000,74 @@
       ],
       "limitation": "n=2",
       "owner": "AI/ML"
+    },
+    {
+      "id": "caching.degraded_results",
+      "area": "caching",
+      "priority": "P1",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "A verdict reached while retrieval partly failed is not reused; a no-evidence verdict is re-checked within minutes",
+      "implementation": "RetrievalResult.degraded; TTLCache per-entry TTL (H-20)",
+      "test": "3 cases; 2 failed before the fix",
+      "observed": "Pass",
+      "evidence": [
+        "backend/tests/test_hardening2.py::test_h20_result_from_partly_failed_search_is_not_cached",
+        "backend/tests/test_hardening2.py::test_h20_no_evidence_result_expires_quickly"
+      ],
+      "limitation": "Grounding mode reports no partial failure, so its results are never marked degraded",
+      "owner": "Backend"
+    },
+    {
+      "id": "caching.extraction_key",
+      "area": "caching",
+      "priority": "P2",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "An extraction is reused only for the same clip settings and prompt version",
+      "implementation": "Cache key with window, fps, resolution, EXTRACTION_PROMPT_VERSION (H-21)",
+      "test": "Different window setting triggers a new call; same 3 s bucket still hits",
+      "observed": "Pass",
+      "evidence": [
+        "backend/tests/test_hardening2.py::test_h21_extraction_cache_distinguishes_window_settings",
+        "backend/tests/test_extraction.py::test_cache_hit_avoids_second_model_call"
+      ],
+      "limitation": "-",
+      "owner": "Backend"
+    },
+    {
+      "id": "verification.statement_date",
+      "area": "temporal",
+      "priority": "P1",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "The evaluator knows when a video claim was published",
+      "implementation": "Upload date from watch-page microdata, only when it names the current video; statement_date in prompt and cache key (H-22)",
+      "test": "Validation, prompt, cache key; content-script parsing incl. stale microdata; request from the side panel",
+      "observed": "Pass",
+      "evidence": [
+        "backend/tests/test_hardening2.py::test_h22_statement_date_reaches_the_evaluator",
+        "extension/test/videoContext.test.ts",
+        "extension/test/App.test.tsx"
+      ],
+      "limitation": "Real YouTube markup not tested (YouTube unreachable); model compliance with the date rule not tested",
+      "owner": "Full stack"
+    },
+    {
+      "id": "ui.claim_from_other_video",
+      "area": "ux",
+      "priority": "P2",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "The panel says when the claim shown belongs to a different video than the one playing",
+      "implementation": "Notice in App (H-23)",
+      "test": "Navigate away and back; failed before the fix",
+      "observed": "Pass",
+      "evidence": [
+        "extension/test/App.test.tsx"
+      ],
+      "limitation": "-",
+      "owner": "Frontend"
     }
   ]
 }

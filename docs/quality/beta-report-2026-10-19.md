@@ -99,3 +99,19 @@ rotated; per-process limits (DevOps issues #9–#13).
 1. Owner: rotate the key and run `docs/beta-validation-windows.md` steps 1–3 (≤ 6 calls).
 2. Owner: annotate the 6 prepared cases, then grow to 30–50 (`docs/annotation-guide.md`).
 3. Engineering: semantic attribution check (issue #6), validated on the annotated cases.
+
+## M. Hardening round 2 (same day)
+
+Four defects found by audit, each reproduced by a test that failed before its fix
+(register: [`defects.md`](defects.md) H-20 to H-23):
+
+| ID | Defect | Status |
+|---|---|---|
+| H-20 (S2) | Verdicts from a partly failed search, or with no evidence, were cached for an hour | Fixed |
+| H-21 (S3) | Extraction cache ignored clip window, fps, resolution and prompt version | Fixed |
+| H-22 (S2) | Evaluator never knew when the claim was made | Mitigated: date sent and used; real YouTube markup and model compliance not tested |
+| H-23 (S2) | A claim from a previous video was shown under the new video with no notice | Fixed |
+
+`VERIFICATION_POLICY_VERSION` bumped to `2026-10-19.2` (evaluation prompt changed). Model
+calls this round: 0. Results after this round: backend 383 passed, 1 xfailed (L-1); extension
+55 passed; browser smoke 14/14 checks passed.
