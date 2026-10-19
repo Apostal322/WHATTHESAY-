@@ -1,4 +1,5 @@
 import { useCallback, useReducer, useRef, useState } from "react";
+import { OriginTag, OtherVideoCheck } from "../components/CheckOrigin";
 import { ClaimEditor } from "../components/ClaimEditor";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { Header } from "../components/Header";
@@ -8,7 +9,7 @@ import { VerdictCard } from "../components/VerdictCard";
 import { VideoBar } from "../components/VideoBar";
 import { ApiError, type ApiClient } from "../shared/api";
 import { formatTimestamp } from "../shared/format";
-import { initialState, reducer, type UiError } from "../shared/state";
+import { initialState, reducer, type ClaimOrigin, type State, type UiError, type VideoRef } from "../shared/state";
 import type { Language } from "../shared/types";
 import { useBackendStatus, useVideoContext } from "./hooks";
 import type { VideoContextSource } from "./videoSource";
@@ -39,13 +40,24 @@ export function App({ api, videoSource }: Props) {
   // A request whose controller was replaced (new request or reset) must not touch state.
   const superseded = (controller: AbortController) => abortRef.current !== controller;
 
+  // One earlier finished check, so starting a new one never loses it.
+  const [previous, setPrevious] = useState<State | null>(null);
+  const keepIfFinished = () => {
+    if (state.phase === "complete") setPrevious(state);
+  };
+
   const extract = useCallback(
-    async (videoId: string, timestampSec: number, durationSec: number | null, publishedDate: string | null) => {
+    async (video: VideoRef) => {
       const controller = newController();
-      dispatch({ type: "EXTRACT_START", videoId, timestampSec, publishedDate });
+      dispatch({ type: "EXTRACT_START", ...video });
       try {
         const response = await api.extractClaim(
-          { video_id: videoId, timestamp_sec: timestampSec, duration_sec: durationSec, language },
+          {
+            video_id: video.videoId,
+            timestamp_sec: video.timestampSec,
+            duration_sec: video.durationSec ?? null,
+            language,
+          },
           controller.signal,
         );
         if (!superseded(controller)) dispatch({ type: "EXTRACT_DONE", response });
@@ -66,11 +78,18 @@ export function App({ api, videoSource }: Props) {
       // Re-read at click time so the timestamp is exactly where the user is now.
       const fresh = await refresh();
       if (fresh.status !== "ok") return;
-      await extract(fresh.videoId, fresh.timestampSec, fresh.durationSec, fresh.publishedDate);
+      keepIfFinished();
+      await extract({
+        videoId: fresh.videoId,
+        timestampSec: fresh.timestampSec,
+        durationSec: fresh.durationSec,
+        title: fresh.title,
+        publishedDate: fresh.publishedDate,
+      });
     } finally {
       startingRef.current = false;
     }
-  }, [extract, refresh]);
+  }, [extract, refresh, state]);
 
   const verify = useCallback(async () => {
     const controller = newController();
@@ -84,6 +103,7 @@ export function App({ api, videoSource }: Props) {
           video_id: state.origin?.videoId ?? null,
           timestamp_sec: state.origin?.timestampSec ?? null,
           statement_date: state.origin?.source === "video" ? state.origin.statementDate : null,
+          video_published_date: state.origin?.source === "video" ? state.origin.videoPublishedDate : null,
           language,
         },
         (stage) => !superseded(controller) && dispatch({ type: "VERIFY_STAGE", stage }),
@@ -97,52 +117,85 @@ export function App({ api, videoSource }: Props) {
 
   const cancel = () => abortRef.current?.abort();
 
-  const manual = () =>
+  const manual = () => {
+    keepIfFinished();
     dispatch({
       type: "MANUAL_ENTRY",
       videoId: ctx?.status === "ok" ? ctx.videoId : null,
       timestampSec: ctx?.status === "ok" ? ctx.timestampSec : null,
     });
+  };
 
   const retry = () => {
-    if (state.error?.during === "extraction" && state.origin?.videoId != null && state.origin.timestampSec != null) {
-      void extract(
-        state.origin.videoId,
-        state.origin.timestampSec,
-        ctx?.status === "ok" ? ctx.durationSec : null,
-        state.origin.statementDate,
-      );
+    const o = state.origin;
+    if (state.error?.during === "extraction" && o?.videoId != null && o.timestampSec != null) {
+      // Everything from the check's own video, never from whatever is playing now.
+      void extract({
+        videoId: o.videoId,
+        timestampSec: o.timestampSec,
+        durationSec: o.durationSec,
+        title: o.videoTitle,
+        publishedDate: o.videoPublishedDate,
+      });
     } else {
       void verify();
     }
   };
 
   const reset = () => {
+    keepIfFinished();
     abortRef.current?.abort();
     abortRef.current = null;
     dispatch({ type: "RESET" });
   };
 
+  const showPrevious = () => {
+    if (!previous) return;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setPrevious(state.phase === "complete" ? state : null);
+    dispatch({ type: "RESTORE", snapshot: previous });
+  };
+
   const videoReady = ctx?.status === "ok";
   const isManual = state.origin?.source === "manual";
-  // After the user moves on to another video, the claim and verdict still describe the first one.
+  // A check stays bound to the video it came from. While another video is playing, a finished
+  // or editable check is held back (not shown as if about this video) until the user asks.
   const origin = state.origin;
-  const fromOtherVideo =
-    state.phase !== "idle" && origin?.source === "video" && ctx?.status === "ok" && origin.videoId !== ctx.videoId;
+  const bound = origin?.source === "video" && origin.videoId != null;
+  const elsewhere = bound && ctx?.status === "ok" && origin.videoId !== ctx.videoId;
+  // The origin object is the check's identity: the same through its phases, new for a new check.
+  const [shownOrigin, setShownOrigin] = useState<ClaimOrigin | null>(null);
+  const held = elsewhere && shownOrigin !== origin && ["claim_ready", "complete", "error"].includes(state.phase);
+  const visible = (phase: State["phase"]) => state.phase === phase && !held;
 
   return (
     <div className="app">
       <Header status={backend} language={language} onLanguageChange={setLanguage} />
       <main className="main">
         <VideoBar ctx={ctx} />
-        {fromOtherVideo && (
+        {bound && state.phase !== "idle" && !held && <OriginTag origin={origin} />}
+        {elsewhere && !held && state.phase !== "idle" && (
           <p className="notice" role="status">
-            This claim is from the video you were watching before
-            {origin.timestampSec != null ? `, at ${formatTimestamp(origin.timestampSec)}` : ""}, not the one now playing.
+            This check is for the video you were watching before, not the one now playing.
           </p>
         )}
+        {held && (
+          <OtherVideoCheck
+            origin={origin}
+            done={state.phase === "complete"}
+            onShow={() => setShownOrigin(origin)}
+            onNewCheck={reset}
+          />
+        )}
+        {previous && previous !== state && state.phase !== "extracting" && (
+          <button type="button" className="btn btn-link" onClick={showPrevious}>
+            Show the previous check
+            {previous.origin?.videoTitle ? ` (${previous.origin.videoTitle})` : ""}
+          </button>
+        )}
 
-        {state.phase !== "idle" && state.phase !== "error" && <ProgressSteps phase={state.phase} stage={state.stage} manual={isManual} />}
+        {state.phase !== "idle" && state.phase !== "error" && !held && <ProgressSteps phase={state.phase} stage={state.stage} manual={isManual} />}
 
         {state.phase === "idle" && (
           <section className="card intro">
@@ -177,7 +230,7 @@ export function App({ api, videoSource }: Props) {
           </section>
         )}
 
-        {state.phase === "claim_ready" && (
+        {visible("claim_ready") && (
           <ClaimEditor
             value={state.draftClaim}
             extraction={state.extraction}
@@ -197,7 +250,7 @@ export function App({ api, videoSource }: Props) {
           </section>
         )}
 
-        {state.phase === "complete" && state.result && (
+        {visible("complete") && state.result && (
           <>
             <VerdictCard result={state.result} />
             <SourceList sources={state.result.sources} />
@@ -212,7 +265,7 @@ export function App({ api, videoSource }: Props) {
           </>
         )}
 
-        {state.phase === "error" && state.error && (
+        {visible("error") && state.error && (
           <ErrorPanel
             error={state.error}
             onRetry={retry}

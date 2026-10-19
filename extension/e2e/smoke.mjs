@@ -98,6 +98,12 @@ try {
   });
   await panel.getByText("Second Video").waitFor({ timeout: 5000 });
   check(true, "SPA navigation picked up");
+  // The verdict belongs to the first video: held back, not shown under the second one.
+  await panel.getByText("This result is for another video").waitFor({ timeout: 5000 });
+  check(
+    (await panel.getByRole("heading", { name: "Contradicted" }).count()) === 0,
+    "verdict for the previous video held back after navigation",
+  );
 
   // MV3: Chrome may stop the service worker at any time. Stop it, then require the panel to
   // read the video context again (that request goes through a freshly started worker).
