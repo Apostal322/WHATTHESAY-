@@ -131,8 +131,9 @@ remote-code check and the real-browser smoke test were added.
    unverified text. Prototyped, that rule changed 5 existing outcomes, including the default
    grounding mode's common case. It trades recall for precision. Decide after labelled data
    exists, or accept the conservative rule now.
-2. **Semantic attribution check (L-1).** Closing it needs entailment between the quotation and
-   the claim, which means another model call or an NLI model, with its own cost and errors.
+2. **Semantic attribution check (L-1).** Implemented on 2026-10-19 as a bounded model stage
+   (H-25, [`semantic-temporal-report-2026-10-19.md`](semantic-temporal-report-2026-10-19.md));
+   its live accuracy still has to be measured on labelled passages.
 
 ## Release readiness
 

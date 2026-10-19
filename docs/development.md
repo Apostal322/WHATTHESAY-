@@ -31,7 +31,8 @@ backend/app/
   models/       API schemas, model-output schemas
   services/     youtube validation, Gemini adapter, prompts, extraction, retrieval
                 (grounding / search + page fetch), verification + guardrails,
-                attribution safeguard, citation integrity
+                attribution (identity, authenticity, entailment stage), temporal
+                context, citation integrity
   evaluation/   eval dataset schema and metrics; reference records, offline evidence
                 fixtures, chronology, proposition-level runs
 backend/tests/  unit, API and adapter tests; e2e_server.py (smoke-test fixture) and

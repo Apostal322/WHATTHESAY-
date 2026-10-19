@@ -10,7 +10,8 @@ artifact says so.
     python scripts/run_fixture_case.py --llm gemini --max-calls 10
     python scripts/run_fixture_case.py --llm gemini --max-calls 4 --only P2 P5
 
-Calls: 2 per proposition (analysis, evaluation); no search or grounding call is made.
+Calls: up to 3 per proposition (analysis, evaluation, and the entailment check for claims about
+what someone said); no search or grounding call is made.
 YOUVERIFY_MAX_RETRIES is forced to 0 and the fallback model is disabled unless
 --allow-fallback, so --max-calls is a hard bound. Refuses to start if the fixture has no
 captured excerpts (run scripts/capture_evidence.py first). Writes
@@ -39,7 +40,9 @@ from app.evaluation.reference import ReferenceRecord
 from app.services.llm import GeminiClient
 from app.services.verification import VerificationService
 
-CALLS_PER_PROPOSITION = 2
+# Analysis and evaluation, plus the entailment check when a claim about what someone said gets
+# a confident verdict: an upper bound, so the run never stops part-way through a proposition.
+CALLS_PER_PROPOSITION = 3
 
 
 def load_case(case: str) -> tuple[ReferenceRecord, EvidenceFixture]:

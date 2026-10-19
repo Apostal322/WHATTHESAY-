@@ -170,9 +170,10 @@ flowchart TD
 |---|---|---|
 | **A. Extraction** | Gemini receives the public YouTube URL with clip offsets and a low frame rate and media resolution. It returns a structured `ExtractionOutput`: the claim, its type (`factual` / `prediction` / `opinion` / `ambiguous` / `non_verifiable`), context, and what was said, flagged as exact quote or paraphrase. | `services/extraction.py` |
 | **B. Confirmation** | Timestamp alignment is best-effort, so a person always confirms or edits the claim. | `components/ClaimEditor.tsx` |
-| **A′. Analysis** | Re-classifies the (possibly edited) claim and plans search queries. It also records whom the claim attributes words to and any exact words quoted. Opinions and predictions stop here. | `services/verification.py`, `prompts.py` |
+| **A′. Analysis** | Re-classifies the (possibly edited) claim and plans search queries, aimed at the period the claim was said in when that is known. It also records whom the claim attributes words to and any exact words quoted. Opinions and predictions stop here. | `services/verification.py`, `prompts.py`, `temporal.py` |
 | **C. Retrieval** | *Grounding mode:* sources come **only** from Gemini's `grounding_chunks`, with excerpts from `grounding_supports`; the model cannot add a URL. *Search mode:* Brave/SearXNG with failover and a circuit breaker; canonical-URL dedupe, rank fusion across queries, a lexical relevance filter, and at most two results per site. Pages are fetched SSRF-safely and verbatim passages of up to 400 characters are extracted and re-checked against the page. | `services/retrieval.py`, `search.py`, `evidence.py`, `fetch.py`, `citations.py` |
-| **D. Evaluation** | A separate tool-less Gemini call sees only the numbered sources and where each excerpt came from. It assesses each source, then proposes a verdict with `[S#]` citations. | `prompts.py`, `verification.py` |
+| **D. Evaluation** | A separate tool-less Gemini call sees only the numbered sources, where each excerpt came from and when each was published. It assesses each source, then proposes a verdict with `[S#]` citations. It is told when the claim was said only if the video or the user gives that date; the upload date is only an upper bound. | `prompts.py`, `verification.py`, `temporal.py` |
+| **D′. Entailment** | Only for a claim about what someone said that reached a confident verdict: one narrow call that sees the claim, the named speaker and the candidate passages (nothing else). It splits the claim into parts and judges, for each part and passage, whether the person's own words entail it, contradict it, or neither, and who is speaking. | `entailment.py`, `attribution.py` |
 | **E. Safeguards** | Deterministic Python. It can **change** the verdict (recorded in `verdict_adjustments`) or **warn** (recorded in `guardrail_notes`). See the table below. | `verification.py`, `attribution.py`, `evidence.py` |
 
 **Safeguards (they change the verdict)**
@@ -181,7 +182,9 @@ flowchart TD
 |---|---|---|
 | `verdict_without_backing_source` | `supported` / `contradicted` / `mixed` with no source assessed in that direction | `insufficient_evidence` |
 | `attribution_without_direct_evidence` | A claim about what someone said ("X said…", "X заявил…", or flagged by the analysis) without the speaker's own words in a backing source. Own words means a quotation in an excerpt that names them, or a transcript line under their label, found in page text or in two independent sources. A moderator restating the claim, or a quotation from someone else, does not count. | `insufficient_evidence` |
-| `exact_quote_not_confirmed` | `supported` for a claim that quotes words, when those words are not verbatim in a supporting source | `insufficient_evidence` |
+| `exact_quote_not_confirmed` | `supported` for a claim that quotes words, when those words are not verbatim in a supporting source (across languages, a faithful translation is judged in D′) | `insufficient_evidence` |
+| `attribution_not_entailed` | The speaker's own words are there, but D′ finds they do not say what the claim says (another topic, a negation, a different number or date), or only part of it, or both ways; or D′ could not run | `insufficient_evidence`, or `mixed` when part is confirmed or the speaker said both. Never the opposite verdict |
+| `verdict_contradicts_own_findings` | `supported` / `contradicted` while one of the evaluation's own evidence-backed findings goes the other way | `mixed` |
 
 **Warnings (advisory notes, verdict unchanged):** verdict resting on a single origin; quoted
 words in the explanation not found in the cited page text; dropped unknown citations;
@@ -383,9 +386,13 @@ Details and threat model: [docs/security-privacy.md](docs/security-privacy.md).
 - **Grounding excerpts are summaries, not page text.** In the default mode the evaluator judges
   Google's attributed summaries, not full pages.
 - **Per-source stances are model judgements.** Safeguards enforce consistency, not truth.
-- **The attribution check is heuristic.** It detects quotation marks and speaker labels, not
-  meaning, and it errs toward `insufficient_evidence`
+- **The attribution check's meaning test is a model judgement.** Identity and authenticity are
+  deterministic; whether the words say what the claim says (D′) is judged by the model, and its
+  accuracy against human labels has not been measured yet. Every failure errs toward
+  `insufficient_evidence` or `mixed`
   ([details](docs/live-validation-report.md#7g-attribution-safeguard-2026-10-14-no-api-calls)).
+- **When something was said is often unknown.** The upload date is only an upper bound; a date
+  is used only if the clip shows or states it.
 - **Scope:** public `youtube.com/watch` videos only; no Shorts, live streams, private or
   unlisted videos.
 - **Single-user local backend:** no auth, and the cache and rate limits are in memory.
@@ -397,7 +404,9 @@ Details and threat model: [docs/security-privacy.md](docs/security-privacy.md).
 - [ ] Build a human-labelled set of 30–50 EN/RU video moments, then report the false confident
       rate, extraction accuracy and F1
 - [ ] Use official caption tracks, where available, for exact quotes and alignment
-- [ ] Add NLI-based entailment between quotes and claims, to make the attribution check semantic
+- [x] Semantic entailment between quotes and claims (model stage; an offline NLI model can be
+      compared through the same interface)
+- [ ] Measure the entailment stage against human labels (EN, RU, cross-language)
 - [ ] Add a Redis cache, per-user quotas and auth for a shared deployment
 
 ## Project structure

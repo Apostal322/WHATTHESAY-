@@ -8,7 +8,8 @@ Manual input is labelled as such in the artifact and is never reported as a vide
     python scripts/verify_claim.py --from-run eval/runs/live-X/results.json --case en-debate-1200 \\
         --price-in 0.75 --price-out 3.75 --price-search-1k 14
 
-Model calls: 3 per run when nothing fails (analysis, retrieval, evaluation); each step may add one
+Model calls: 3 per run when nothing fails (analysis, retrieval, evaluation), 4 for a claim about
+what someone said that reaches a confident verdict (entailment check); each step may add one
 fallback call on HTTP 503 when YOUVERIFY_FALLBACK_MODEL is set. SDK retries follow
 YOUVERIFY_MAX_RETRIES (set it to 0 to bound calls exactly). Writes
 eval/factchecks/<id>-<timestamp>.json, plus a Markdown review sheet next to it.

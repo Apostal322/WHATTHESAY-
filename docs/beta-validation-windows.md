@@ -2,7 +2,7 @@
 
 The development sandbox cannot do this: it reaches only the Gemini API, and the only key it
 has is the one that was exposed in a chat. Run these steps on your own machine. Budget: at most
-**6 model calls** and well under **$1** (about $0.03 in tokens per claim plus Google Search
+**7 model calls** (11 with the optional control in step 2) and well under **$1** (about $0.03 in tokens per claim plus Google Search
 grounding fees for up to 4 queries per claim, depending on your plan).
 
 ## 0. Rotate the key (required)
@@ -29,10 +29,13 @@ python scripts\diagnose_env.py --live
 Stop if `gemini_grounding` says `quota_exhausted`: grounding needs quota on your key (or set
 up Brave search, see `.env.example`). `overloaded` means try again later.
 
-## 2. Two manual-claim fact-checks (6 calls)
+## 2. Two manual-claim fact-checks (7 calls)
+
+The first claim is about what someone said, so it also runs the entailment check (4 calls); the
+second is a factual claim (3 calls).
 
 ```powershell
-$env:YOUVERIFY_GEMINI_DAILY_CALL_LIMIT = "6"; $env:YOUVERIFY_MAX_RETRIES = "0"
+$env:YOUVERIFY_GEMINI_DAILY_CALL_LIMIT = "7"; $env:YOUVERIFY_MAX_RETRIES = "0"
 python scripts\verify_claim.py --id en-debate-1200-p2 --language en `
   --claim "In late August 2024 Donald Trump said he would vote against Florida's Amendment 4." `
   --context "Reported 30 August 2024; discussed at the 10 September 2024 ABC presidential debate."
@@ -43,6 +46,16 @@ python scripts\verify_claim.py --id en-debate-1200-p5 --language en `
 
 Each run writes `eval/factchecks/<id>-<time>.json` and a `.md` review sheet. This is **live
 manual-claim verification**, not video-to-verdict validation.
+
+Optional control for the entailment check (issue #6; 4 more calls, raise the limit to 11): his
+real words ("I will be voting no") do not say this, so a correct result is `mixed` or
+`insufficient_evidence` with the rule `attribution_not_entailed`, never `supported`.
+
+```powershell
+python scripts\verify_claim.py --id en-debate-1200-l1-control --language en `
+  --claim "In late August 2024 Donald Trump said he would vote to keep Florida's six-week abortion ban." `
+  --context "Reported 30 August 2024; discussed at the 10 September 2024 ABC presidential debate."
+```
 
 ## 3. Review (the result counts only after this)
 
@@ -55,8 +68,10 @@ date? Compare with `eval/reference/en-debate-1200.md` (AI-reviewed, not ground t
 1. `uvicorn app.main:app --host 127.0.0.1 --port 8000` (in `backend\`), then build and load
    the extension ([README](../README.md#installation)).
 2. Open `https://www.youtube.com/watch?v=VgsC_aBquUE&t=1200s`, pause, click **Verify claim**.
-3. Check: the right sentence and speaker are proposed; you can edit; Cancel works; the verdict
-   shows sources that open; a second video after navigation shows its own title.
+3. Check: the right sentence and speaker are proposed; "Claim from" names this video and says
+   when it was said (or that the date is unknown); you can edit; Cancel works; the verdict shows
+   sources that open; after navigating to a second video the verdict is held back as "for
+   another video" and comes back, labelled, on request.
 
 That is the first **live video-to-verdict** run. Record what happened (screenshots welcome)
 in a new issue or in `eval/factchecks/`.
