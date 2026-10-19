@@ -1057,16 +1057,17 @@
       "priority": "P1",
       "status": "PASS",
       "validation": "unit",
-      "requirement": "The evaluator knows when a video claim was published",
-      "implementation": "Upload date from watch-page microdata, only when it names the current video; statement_date in prompt and cache key (H-22)",
-      "test": "Validation, prompt, cache key; content-script parsing incl. stale microdata; request from the side panel",
+      "requirement": "The upload date is never treated as when the claim was said; a statement date is used only when the video (or user) gives it; evidence publication dates are shown; conflicting dates become unknown",
+      "implementation": "temporal.py: TemporalContext (statement date, upload date as upper bound) in analysis and evaluation prompts and the cache key; extraction reports a date only from the clip; page/provider publication dates on sources (H-22, H-26)",
+      "test": "Archival upload, recording date, rebroadcast, compilation clips, conflicting/future dates, validation, cache equivalence, extraction validation, page/provider dates; the archival case failed before",
       "observed": "Pass",
       "evidence": [
-        "backend/tests/test_hardening2.py::test_h22_statement_date_reaches_the_evaluator",
-        "extension/test/videoContext.test.ts",
-        "extension/test/App.test.tsx"
+        "backend/tests/test_temporal.py::test_old_footage_uploaded_recently_is_not_judged_as_of_the_upload_date",
+        "backend/tests/test_temporal.py::test_cache_separates_temporal_contexts_and_merges_equivalent_ones",
+        "backend/tests/test_temporal.py::test_provider_dates_reach_sources_and_the_evaluator",
+        "extension/test/videoContext.test.ts"
       ],
-      "limitation": "Real YouTube markup not tested (YouTube unreachable); model compliance with the date rule not tested",
+      "limitation": "Whether the model reads dates in clips correctly, and applies the date rules, is not tested; real YouTube markup not tested",
       "owner": "Full stack"
     },
     {

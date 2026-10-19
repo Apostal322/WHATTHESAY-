@@ -32,6 +32,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 
 from app.services.citations import is_safe_display_url
+from app.services.temporal import page_published_date
 
 MAX_REDIRECTS = 3
 USER_AGENT = "YouVerifyBot/0.1 (+fact-check evidence retrieval)"
@@ -55,6 +56,7 @@ def html_to_paragraphs(raw: str) -> list[str]:
 class FetchedPage:
     url: str  # final URL after redirects
     paragraphs: list[str]
+    published_date: str | None = None  # from the page's own metadata, YYYY-MM-DD
 
 
 class FetchError(Exception):
@@ -174,6 +176,10 @@ async def fetch_page(
         except httpx.HTTPError as exc:
             raise FetchError(type(exc).__name__) from exc
         if "html" in ctype:
-            return FetchedPage(url=current, paragraphs=html_to_paragraphs(text))
+            return FetchedPage(
+                url=current,
+                paragraphs=html_to_paragraphs(text),
+                published_date=page_published_date(text),
+            )
         return FetchedPage(url=current, paragraphs=[p for p in text.split("\n\n") if p.strip()])
     raise FetchError("too_many_redirects")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 
 from app.core.cache import TTLCache
 from app.core.config import Settings
@@ -13,6 +14,7 @@ from app.models.schemas import ExtractRequest, ExtractResponse, TimeWindow, Toke
 from app.services.llm import LLMClient, VideoClip
 from app.services.prompts import EXTRACTION_SYSTEM, extraction_prompt
 from app.services.structured import clip, parse_model_json, to_token_usage
+from app.services.temporal import earliest, valid_partial_date
 from app.services.youtube import canonical_watch_url, parse_video_id
 
 log = logging.getLogger(__name__)
@@ -20,7 +22,7 @@ log = logging.getLogger(__name__)
 # Clicks within the same few seconds should hit the cache.
 _CACHE_BUCKET_SEC = 3
 # Bump when the extraction prompt changes what a cached extraction would say.
-EXTRACTION_PROMPT_VERSION = "2026-10-19"
+EXTRACTION_PROMPT_VERSION = "2026-10-19.2"
 
 
 def compute_window(
@@ -123,6 +125,14 @@ class ExtractionService:
         return response
 
 
+def _statement_date(value: str | None) -> str | None:
+    """The model's date, only if well formed, real and not in the future."""
+    v = (value or "").strip()
+    if not v or not valid_partial_date(v) or earliest(v) > date.today():
+        return None
+    return v
+
+
 def build_extract_response(
     out: ExtractionOutput,
     video_id: str,
@@ -138,6 +148,7 @@ def build_extract_response(
     evidence = clip(out.evidence_from_video, 1500)
     # A quote flag without quote text is meaningless; never claim verbatim by default.
     is_exact = bool(out.is_exact_quote and evidence)
+    said_on = _statement_date(out.statement_date)
 
     if not found:
         return ExtractResponse(
@@ -169,6 +180,8 @@ def build_extract_response(
         evidence_from_video=evidence,
         is_exact_quote=is_exact,
         language=clip(out.language, 10),
+        statement_date=said_on,
+        statement_date_evidence=clip(out.statement_date_evidence, 300) if said_on else None,
         model=model,
         latency_ms=latency_ms,
         usage=usage,

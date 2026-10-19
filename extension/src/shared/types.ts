@@ -35,6 +35,9 @@ export interface ExtractResponse {
   is_exact_quote: boolean;
   requires_user_confirmation: true;
   language: string | null;
+  /** When it was said, only if the clip itself shows or states it (YYYY[-MM[-DD]]). */
+  statement_date: string | null;
+  statement_date_evidence: string | null;
   reason: string | null;
   model: string;
   latency_ms: number;
@@ -48,7 +51,10 @@ export interface VerifyRequest {
   claim_type_hint?: ClaimType | null;
   video_id?: string | null;
   timestamp_sec?: number | null;
+  /** When it was said, only if actually known; never the upload date. */
   statement_date?: string | null;
+  /** The video's upload date: the claim was said on or before it. */
+  video_published_date?: string | null;
   language: Language;
 }
 

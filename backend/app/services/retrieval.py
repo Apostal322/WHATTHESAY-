@@ -169,6 +169,7 @@ class SearchRetriever:
                         domain=normalize_domain(item.url),
                         excerpts=[item.snippet[:400]],
                         origin="search_snippet",
+                        published_date=item.published_date,
                     ),
                     f"fetch_failed:{reason}",
                 )
@@ -188,6 +189,7 @@ class SearchRetriever:
                 domain=normalize_domain(page.url),
                 excerpts=passages,
                 origin="page_text",
+                published_date=page.published_date or item.published_date,
             ),
             "page_text",
         )

@@ -19,6 +19,8 @@ export function extraction(overrides: Partial<ExtractResponse> = {}): ExtractRes
     is_exact_quote: false,
     requires_user_confirmation: true,
     language: "en",
+    statement_date: null,
+    statement_date_evidence: null,
     reason: null,
     model: "fake",
     latency_ms: 1000,

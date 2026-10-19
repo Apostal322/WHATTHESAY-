@@ -99,6 +99,7 @@ class RankedHit:
     rrf: float
     relevance: float
     found_by: set[str] = field(default_factory=set)  # queries that returned it
+    published_date: str | None = None  # from any provider that reported one
 
 
 def rank_hits(
@@ -126,6 +127,7 @@ def rank_hits(
                     rrf=0.0,
                     relevance=0.0,
                 )
+            item.published_date = item.published_date or hit.published_date
             item.rrf += 1.0 / (RRF_K + hit.rank)
             item.found_by.add(query)
             if hit.snippet and len(hit.snippet) > len(item.snippet or ""):

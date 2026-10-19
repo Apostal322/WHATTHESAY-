@@ -30,6 +30,14 @@ class ExtractionOutput(BaseModel):
     )
     context: str | None = Field(default=None, description="1-2 sentences of surrounding context.")
     language: str | None = Field(default=None, description="ISO 639-1 code of the speech.")
+    statement_date: str | None = Field(
+        default=None,
+        description="When the statement was said or recorded, ONLY if the clip itself shows or "
+        "states it: YYYY, YYYY-MM or YYYY-MM-DD. Null otherwise.",
+    )
+    statement_date_evidence: str | None = Field(
+        default=None, description="What in the clip shows that date."
+    )
     reason_if_not_found: str | None = None
 
 

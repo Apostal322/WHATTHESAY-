@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import unicodedata
-from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.services.temporal import PARTIAL_DATE_RE, valid_partial_date
 
 ClaimType = Literal["factual", "prediction", "opinion", "ambiguous", "non_verifiable"]
 Verdict = Literal["supported", "contradicted", "mixed", "insufficient_evidence", "not_verifiable"]
@@ -91,6 +92,14 @@ class ExtractResponse(BaseModel):
     )
     requires_user_confirmation: Literal[True] = True
     language: str | None
+    statement_date: str | None = Field(
+        default=None,
+        description="When it was said, if the clip itself shows or states it (YYYY[-MM[-DD]]). "
+        "Model-reported; never the upload date.",
+    )
+    statement_date_evidence: str | None = Field(
+        default=None, description="What in the clip shows the date (a caption, the speaker...)."
+    )
     reason: str | None = Field(default=None, description="Why no claim was found, if applicable.")
     model: str
     latency_ms: int
@@ -109,16 +118,22 @@ class VerifyRequest(_Strict):
     timestamp_sec: float | None = Field(default=None, ge=0, le=MAX_TIMESTAMP_SEC, strict=True)
     statement_date: str | None = Field(
         default=None,
+        pattern=PARTIAL_DATE_RE,
+        description="When the claim was said, only if actually known (shown or stated in the "
+        "video, or given by the user): YYYY, YYYY-MM or YYYY-MM-DD. Never the upload date.",
+    )
+    video_published_date: str | None = Field(
+        default=None,
         pattern=r"^\d{4}-\d{2}-\d{2}$",
-        description="When the claim was published (the video's upload date), YYYY-MM-DD.",
+        description="The video's publication (upload) date: the claim was said on or before it.",
     )
     language: Language = "auto"
 
-    @field_validator("statement_date")
+    @field_validator("statement_date", "video_published_date")
     @classmethod
     def _real_date(cls, v: str | None) -> str | None:
-        if v is not None:
-            date.fromisoformat(v)  # rejects 2024-02-30
+        if v is not None and not valid_partial_date(v):
+            raise ValueError("Not a real calendar date.")
         return v
 
     @field_validator("claim", "context", mode="before")

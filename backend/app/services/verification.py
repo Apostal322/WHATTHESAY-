@@ -40,6 +40,7 @@ from app.services.evidence import origin_groups
 from app.services.llm import LLMClient, Usage
 from app.services.retrieval import GeminiGroundingRetriever, RetrievalResult, Retriever
 from app.services.structured import clip, parse_model_json, to_token_usage
+from app.services.temporal import temporal_context
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
 # "Nothing found" may be a passing gap (an index lag, a short outage upstream): re-check soon.
 NO_EVIDENCE_CACHE_TTL_SEC = 300
 # Bump when prompts or verdict safeguards change what a cached response would say.
-VERIFICATION_POLICY_VERSION = "2026-10-19.3"
+VERIFICATION_POLICY_VERSION = "2026-10-19.4"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 # Text between straight or curly double quotes; single quotes are too often apostrophes.
@@ -204,7 +205,8 @@ def verification_cache_key(req: VerifyRequest, model: str, retriever: str) -> st
     parts = [
         " ".join(req.claim.lower().split()),
         " ".join((req.context or "").split()),
-        req.statement_date or "",
+        # When it was said, as reconciled (conflicting or impossible dates are dropped).
+        temporal_context(req.statement_date, req.video_published_date).cache_part(),
         req.language,
         model,
         retriever,
@@ -272,6 +274,7 @@ class VerificationService:
 
         mark = started
         usage = Usage()
+        when = temporal_context(req.statement_date, req.video_published_date)
 
         # --- Step A': classify + plan queries (also covers manual claims) ----
         await progress("analyzing")
@@ -279,7 +282,10 @@ class VerificationService:
             model=model,
             system=prompts.ANALYSIS_SYSTEM,
             prompt=prompts.analysis_prompt(
-                claim=req.claim, context=req.context, language=req.language
+                claim=req.claim,
+                context=req.context,
+                language=req.language,
+                temporal=when.prompt_text(),
             ),
             schema=ClaimAnalysisOutput,
         )
@@ -420,7 +426,7 @@ class VerificationService:
                     scope_notes=analysis.scope_notes,
                     sources_block=format_sources_for_prompt(sources, _same_origin(sources)),
                     context=req.context,
-                    statement_date=req.statement_date,
+                    temporal=when.prompt_text(),
                     language=req.language,
                 ),
                 schema=EvaluationOutput,
@@ -434,7 +440,7 @@ class VerificationService:
 
         # --- Step F: citation integrity + guardrails ---------------------------
         by_id = {src.id: src for src in sources}
-        notes: list[str] = list(retrieval.notices)
+        notes: list[str] = [*retrieval.notices, *when.notes]
         stances: dict[str, Stance] = {}
         assessment_notes: dict[str, str | None] = {}
         dropped = 0
@@ -580,6 +586,7 @@ class VerificationService:
                 title=clip(src.title, 300),
                 url=src.url,
                 domain=src.domain,
+                published_date=src.published_date,
                 retrieved_at=retrieved_at,
                 excerpts=src.excerpts,
                 excerpt_origin=src.origin,

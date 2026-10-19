@@ -71,7 +71,8 @@ Task: identify the single statement the viewer most likely wants to check: the m
 - claim_type: factual (checkable fact about the past/present), prediction (about the future), opinion (value judgement), ambiguous (too vague to check as stated), non_verifiable (not checkable in principle).
 - evidence_from_video: what the speaker said.
 - context: 1-2 sentences of what surrounds the statement.
-- language: ISO 639-1 code of the speech."""
+- language: ISO 639-1 code of the speech.
+- statement_date: when this was said or recorded, only if the clip itself shows or states it (an on-screen date or caption such as "Senate hearing, 12 May 1998", or the speaker naming the date of the occasion). Use YYYY, YYYY-MM or YYYY-MM-DD, as precise as the clip allows; put what shows it in statement_date_evidence. Do not guess from appearance, and do not use the upload date or your own knowledge: otherwise leave both null. Archival footage, compilations and rebroadcasts are often published years after the words were said."""
 
 
 # ------------------------------------------------------------------ analysis
@@ -81,14 +82,14 @@ ANALYSIS_SYSTEM = f"""You prepare claims for evidence-based fact-checking.
 Classify the claim and write focused web search queries. Do not judge whether it is true."""
 
 
-def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
+def analysis_prompt(*, claim: str, context: str | None, language: str, temporal: str = "") -> str:
     ctx = (
         f"\nContext from the video:\n<untrusted>{escape_untrusted(context)}</untrusted>"
         if context
         else ""
     )
     return f"""Claim:
-<untrusted>{escape_untrusted(claim)}</untrusted>{ctx}
+<untrusted>{escape_untrusted(claim)}</untrusted>{ctx}{temporal}
 
 - normalized_claim: restate the claim precisely and self-contained, keeping its original meaning, numbers and scope. Do not strengthen or weaken it. If the context names who said it and when, and the claim depends on that (politics, current events), keep the speaker and date in the claim.
 - claim_type: factual | prediction | opinion | ambiguous | non_verifiable.
@@ -97,7 +98,7 @@ def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
   - Questions, hypotheticals ("if X happened..."), jokes and satire assert nothing as fact: non_verifiable, unless a factual premise is stated as true (then check only that premise).
   - Compound claims ("A happened because of B"): keep every part, including causes, dates, numbers and who said it; a verdict must not cover parts the evidence does not.
 - is_checkworthy: true if at least one objectively checkable factual assertion is present.
-- search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language.
+- search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language. If when it was said is known, aim the queries at that period; if it is unknown, do not assume it is recent.
 - scope_notes: time period, geography, definitions or measurement details the verdict depends on.
 - attributed_to: if the claim is about what a specific person or organization said or wrote (rather than about the facts themselves), who; otherwise an empty string.
 - exact_words: only words the claim presents as that speaker's exact wording (normally in quotation marks); an empty list if the claim paraphrases.
@@ -131,6 +132,7 @@ Summarise the relevant findings as short factual statements, each tied to what a
 EVALUATION_SYSTEM = f"""You evaluate retrieved evidence for a fact-check and produce a verdict.
 {_UNTRUSTED_NOTE}
 Rules:
+- Each source shows its publication date when known. A source published after the statement can describe the earlier period (it counts) or later events (they cannot make an earlier statement false). A source published before the statement cannot report on what was said in it.
 - Use ONLY the numbered sources provided. Do not use your own background knowledge to fill gaps.
 - Cite sources by their id, e.g. [S2]. Never cite an id that is not listed.
 - Consider: time period, geography, definitions of numbers, sample and methodology, and whether sources are independent (several copies of one original report are one piece of evidence).
@@ -156,7 +158,7 @@ def evaluation_prompt(
     sources_block: str,
     language: str,
     context: str | None = None,
-    statement_date: str | None = None,
+    temporal: str = "",
     today: date | None = None,
 ) -> str:
     scope = f"\nScope considerations: {escape_untrusted(scope_notes)}" if scope_notes else ""
@@ -168,18 +170,10 @@ def evaluation_prompt(
         if context
         else ""
     )
-    # Validated as YYYY-MM-DD by the request model, so it is not untrusted text.
-    when = (
-        f"\nThe statement was published on {statement_date} (the video's upload date; it may have "
-        "been said earlier, never later). Judge it as of that date: later events cannot make it "
-        "false, but later reporting about earlier facts still counts."
-        if statement_date
-        else ""
-    )
     as_of = (today or date.today()).isoformat()
     return f"""Today's date: {as_of}.
 Claim to evaluate:
-<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}{when}
+<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}{temporal}
 
 Sources:
 {sources_block}
