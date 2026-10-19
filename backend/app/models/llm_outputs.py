@@ -7,6 +7,8 @@ by deterministic code before anything reaches the user.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.models.schemas import ClaimType, Stance, Verdict
@@ -71,3 +73,26 @@ class EvaluationOutput(BaseModel):
     explanation: str = Field(description="2-4 sentences; cite sources inline as [S1].")
     key_findings: list[FindingOutput]
     limitations: list[str]
+
+
+class PassageSpeaker(BaseModel):
+    passage_id: str
+    speaker_is_named: bool = Field(
+        description="True only if the passage shows these are the words of the person the claim "
+        "names (names may be transliterated or translated)."
+    )
+
+
+class PartRelation(BaseModel):
+    passage_id: str
+    relation: Literal["entails", "contradicts", "neutral"]
+
+
+class ClaimPart(BaseModel):
+    text: str = Field(description="One assertion about what the person said.")
+    relations: list[PartRelation] = Field(description="One per passage.")
+
+
+class EntailmentOutput(BaseModel):
+    speakers: list[PassageSpeaker] = Field(description="One per passage.")
+    parts: list[ClaimPart] = Field(description="Every assertion about what was said.")

@@ -20,6 +20,24 @@ from app.services.retrieval import RetrievalResult
 from app.services.verification import VerificationService
 from tests.conftest import FakeLLM
 
+# What a careful reading of each passage (P1=S1 NBC, P2=S2 Fox, P3/P4=S3/S4 syndicated) gives
+# for the claim's three parts. Trump's own words state parts A and B (NBC). "I will be voting
+# no" (Fox) is the effect the moderator described, not words saying he would vote to support
+# the ban, so part C is neutral; the syndicated text narrates "too short" in the reporter's words.
+ENTAILMENT = {
+    "speakers": [{"passage_id": f"P{i}", "speaker_is_named": True} for i in range(1, 5)],
+    "parts": [
+        {"text": "said the six-week ban was too short", "relations": [
+            {"passage_id": "P1", "relation": "entails"}, {"passage_id": "P2", "relation": "neutral"},
+            {"passage_id": "P3", "relation": "neutral"}, {"passage_id": "P4", "relation": "neutral"}]},
+        {"text": "said he would vote that we need more than six weeks", "relations": [
+            {"passage_id": "P1", "relation": "entails"}, {"passage_id": "P2", "relation": "neutral"},
+            {"passage_id": "P3", "relation": "neutral"}, {"passage_id": "P4", "relation": "neutral"}]},
+        {"text": "next day said he would vote to support the six-week ban", "relations": [
+            {"passage_id": f"P{i}", "relation": "neutral"} for i in range(1, 5)]},
+    ],
+}  # fmt: skip
+
 REF_PATH = Path(__file__).resolve().parents[2] / "eval" / "reference" / "en-debate-1200.json"
 REF = ReferenceRecord.model_validate(json.loads(REF_PATH.read_text(encoding="utf-8")))
 
@@ -95,7 +113,17 @@ class Retriever:
 
 
 def _llm(evaluation: dict[str, object]) -> FakeLLM:
-    return FakeLLM(json_responses={"ClaimAnalysisOutput": ANALYSIS, "EvaluationOutput": evaluation})
+    return FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ANALYSIS,
+            "EvaluationOutput": evaluation,
+            "EntailmentOutput": ENTAILMENT,
+        }
+    )
+
+
+def _prompt(llm: FakeLLM, schema: str) -> str:
+    return str(next(kw["prompt"] for name, kw in llm.calls if name == schema))
 
 
 def _assess(stances: dict[str, str]) -> list[dict[str, str]]:
@@ -222,7 +250,7 @@ async def test_context_with_speaker_and_date_reaches_analysis_and_evaluation(
     await VerificationService(llm, settings, retriever=Retriever()).verify(
         VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
     )
-    analysis_prompt, eval_prompt = llm.calls[0][1]["prompt"], llm.calls[-1][1]["prompt"]
+    analysis_prompt, eval_prompt = llm.calls[0][1]["prompt"], _prompt(llm, "EvaluationOutput")
     for prompt in (analysis_prompt, eval_prompt):
         assert "Linsey Davis" in prompt and "10 September 2024" in prompt
     assert "keep attributions" in eval_prompt
@@ -245,10 +273,15 @@ async def test_syndicated_report_counts_once_and_is_flagged_to_the_evaluator(
     resp = await VerificationService(llm, settings, retriever=Retriever()).verify(
         VerifyRequest(claim=REF.claim, context=CONTEXT, language="en")
     )
-    assert "same site or same original report as S4" in llm.calls[-1][1]["prompt"]
+    assert "same site or same original report as S4" in _prompt(llm, "EvaluationOutput")
     assert resp.independent_source_count == 3  # Axios, Fox, CNA=EWTN
     assert score_verdict(resp.verdict, REF)["acceptable"]
-    assert resp.verdict_adjustments == []  # the reports carry Trump's own words
+    # The reports carry Trump's own words (identity and authenticity pass), but his words only
+    # state two of the three parts: "mixed", which the reference record accepts, naming the
+    # part that is the moderator's characterization.
+    assert resp.verdict == "mixed"
+    (adj,) = resp.verdict_adjustments
+    assert adj.rule == "attribution_not_entailed" and "support the six-week ban" in adj.reason
 
 
 async def test_paraphrase_only_reports_cannot_confirm_what_trump_said(settings: Settings) -> None:

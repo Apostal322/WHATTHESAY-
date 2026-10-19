@@ -29,8 +29,13 @@ from app.models.schemas import (
     VerifyResponse,
 )
 from app.services import prompts
-from app.services.attribution import apply_attribution_safeguard, detect_attribution
+from app.services.attribution import (
+    apply_entailment,
+    check_attribution_evidence,
+    detect_attribution,
+)
 from app.services.citations import EvidenceSource, format_sources_for_prompt
+from app.services.entailment import EntailmentChecker, ModelEntailmentChecker
 from app.services.evidence import origin_groups
 from app.services.llm import LLMClient, Usage
 from app.services.retrieval import GeminiGroundingRetriever, RetrievalResult, Retriever
@@ -45,7 +50,7 @@ NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
 # "Nothing found" may be a passing gap (an index lag, a short outage upstream): re-check soon.
 NO_EVIDENCE_CACHE_TTL_SEC = 300
 # Bump when prompts or verdict safeguards change what a cached response would say.
-VERIFICATION_POLICY_VERSION = "2026-10-19.2"
+VERIFICATION_POLICY_VERSION = "2026-10-19.3"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 # Text between straight or curly double quotes; single quotes are too often apostrophes.
@@ -220,8 +225,10 @@ class VerificationService:
         cache: TTLCache[VerifyResponse] | None = None,
         retriever: Retriever | None = None,
         flights: SingleFlight[VerifyResponse, Stage] | None = None,
+        entailment: EntailmentChecker | None = None,
     ) -> None:
         self._llm = llm
+        self._entailment = entailment or ModelEntailmentChecker(llm, settings.verification_model)
         self._settings = settings
         self._cache = cache
         self._flights = flights
@@ -234,7 +241,9 @@ class VerificationService:
     ) -> VerifyResponse:
         s = self._settings
         model = s.verification_model
-        cache_key = verification_cache_key(req, model, self._retriever.name)
+        cache_key = verification_cache_key(
+            req, model, f"{self._retriever.name}+{self._entailment.name}"
+        )
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             log.info("verify_cache_hit", extra={"verdict": hit.verdict})
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
@@ -284,6 +293,7 @@ class VerificationService:
         ]
 
         retrieval: RetrievalResult | None = None
+        semantic_check_failed = False  # read by finish(): such a result is never cached
 
         def finish(*, search_queries: list[str], **kw: object) -> VerifyResponse:
             billed = retrieval.billed_searches if retrieval else 0
@@ -314,8 +324,8 @@ class VerificationService:
                 },
             )
             if self._cache is not None:
-                if retrieval is not None and retrieval.degraded:
-                    pass  # evidence was incomplete because something failed: never reuse it
+                if (retrieval is not None and retrieval.degraded) or semantic_check_failed:
+                    pass  # a step failed, so the result is incomplete: never reuse it
                 elif retrieval is not None and not resp.sources:
                     self._cache.set(cache_key, resp, ttl_sec=NO_EVIDENCE_CACHE_TTL_SEC)
                 else:
@@ -460,10 +470,24 @@ class VerificationService:
                     reason="No retrieved source was assessed as backing the model's verdict.",
                 )
             )
+        # Attribution: identity and authenticity (deterministic), then entailment (semantic).
         attribution = detect_attribution(req.claim, analysis.attributed_to, analysis.exact_words)
-        verdict, attribution_change = apply_attribution_safeguard(
-            verdict, stances, by_id, attribution
-        )
+        check = check_attribution_evidence(verdict, stances, by_id, attribution)
+        verdict, attribution_change = check.verdict, check.adjustment
+        if check.passages:
+            judgments, used, judged_by = await self._entailment.judge(
+                req.claim, attribution.speaker, check
+            )
+            usage += used
+            if judged_by:
+                models_used["entailment"] = judged_by
+            semantic_check_failed = judgments is None
+            if semantic_check_failed:
+                notes.append("The check of the speaker's own words could not be completed.")
+            verdict, attribution_change = apply_entailment(
+                check, judgments, by_id, attribution.speaker
+            )
+            mark = lap("entailment", mark)
         if attribution_change is not None:
             adjustments.append(attribution_change)
             # There is no longer a verdict for "rests on a single source" to qualify.

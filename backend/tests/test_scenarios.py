@@ -18,7 +18,7 @@ from app.models.schemas import VerifyRequest, VerifyResponse
 from app.services.citations import EvidenceSource
 from app.services.retrieval import RetrievalResult
 from app.services.verification import VerificationService
-from tests.conftest import ANALYSIS_FACTUAL, FakeLLM
+from tests.conftest import ANALYSIS_FACTUAL, FakeLLM, judge_passages
 
 
 def src(sid: str, site: str, text: str, origin: str = "page_text") -> EvidenceSource:
@@ -61,8 +61,11 @@ async def run(
     sources: list[EvidenceSource] | Exception,
     model_eval: dict[str, Any] | None,
     analysis: dict[str, Any] | None = None,
+    entailment: dict[str, Any] | None = None,
 ) -> VerifyResponse:
     responses: dict[str, Any] = {"ClaimAnalysisOutput": analysis or ANALYSIS_FACTUAL}
+    if entailment is not None:
+        responses["EntailmentOutput"] = entailment
     if model_eval is not None:
         responses["EvaluationOutput"] = model_eval
     llm = FakeLLM(json_responses=responses)
@@ -136,6 +139,8 @@ async def test_correct_quote_with_misleading_context(settings: Settings) -> None
                 ("She was describing a plan she opposed [S2].", "contradicts", ["S2"]),
             ],
         ),
+        # She did speak these words: the quote-claim is entailed; the context is the finding's job.
+        entailment=judge_passages("entails"),
     )
     assert resp.verdict == "mixed"
     assert rules(resp) == ["verdict_contradicts_own_findings"]

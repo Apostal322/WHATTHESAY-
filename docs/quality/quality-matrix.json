@@ -414,18 +414,34 @@
     {
       "id": "attribution.semantic_match",
       "area": "attribution",
-      "priority": "P1",
-      "status": "FAIL",
-      "validation": "unit",
-      "requirement": "The speaker's own words must say what the claim says",
-      "implementation": "Not implemented (would need entailment)",
-      "test": "Strict xfail test L-1",
-      "observed": "A transcript line by the right speaker on another topic passes if the model calls it supporting",
+      "priority": "P0",
+      "status": "PASS",
+      "validation": "mocked-integration",
+      "requirement": "A confident verdict about what someone said needs that person's own words to say it (identity, authenticity and entailment checked separately)",
+      "implementation": "Entailment stage (entailment.py): one bounded model call judges each claim part against each candidate passage and who is speaking; apply_entailment decides (L-1, issue #6)",
+      "test": "24 pipeline cases: L-1, paraphrase, negation, number, date, both-ways, compound, other speaker, snippet-only, RU<->EN, translated quote, check unavailable; L-1 and RU<->EN failed before",
+      "observed": "Pass with scripted judgments",
       "evidence": [
-        "backend/tests/test_hardening.py::test_l1_speakers_own_words_on_another_topic_should_not_confirm"
+        "backend/tests/test_semantic_attribution.py::test_l1_speakers_own_words_on_another_topic_do_not_confirm",
+        "backend/tests/test_semantic_attribution.py::test_russian_words_can_confirm_an_english_claim",
+        "backend/tests/test_semantic_attribution.py::test_if_the_check_cannot_run_the_verdict_is_not_confirmed"
       ],
-      "limitation": "Lexical overlap would reject paraphrases and every cross-language case",
+      "limitation": "Tests script the model's judgments; whether the live model judges correctly is the separate row below",
       "owner": "AI/ML"
+    },
+    {
+      "id": "attribution.semantic_match.model_accuracy",
+      "area": "attribution",
+      "priority": "P0",
+      "status": "BLOCKED",
+      "validation": "none",
+      "requirement": "The entailment stage's live judgments agree with human labels (entails / contradicts / neutral, speaker identity), including Russian <-> English",
+      "implementation": "Prompt ENTAILMENT_SYSTEM; verification model",
+      "test": "Not run: no usable model key; no human-labelled attribution passages",
+      "observed": "-",
+      "evidence": [],
+      "limitation": "Owner: rotate the key and label attribution cases (docs/annotation-guide.md); measure agreement, cost and latency before relying on it",
+      "owner": "Owner + AI/ML"
     },
     {
       "id": "decomposition.compound_claims",

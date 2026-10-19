@@ -61,6 +61,25 @@ class FakeLLM:
         return self.grounded
 
 
+def judge_passages(
+    relation: str | list[str], speaker_is_named: bool = True, n: int = 8
+) -> dict[str, Any]:
+    """Scripted EntailmentOutput for passages P1..Pn (unknown ids are ignored).
+
+    `relation` is one relation for a one-part claim, or one per claim part; every passage is
+    judged alike. Use it only where the fixture's passages really do say (or deny) that.
+    """
+    relations = [relation] if isinstance(relation, str) else relation
+    ids = [f"P{i}" for i in range(1, n + 1)]
+    return {
+        "speakers": [{"passage_id": p, "speaker_is_named": speaker_is_named} for p in ids],
+        "parts": [
+            {"text": f"part {k}", "relations": [{"passage_id": p, "relation": r} for p in ids]}
+            for k, r in enumerate(relations, 1)
+        ],
+    }
+
+
 def make_grounded(
     chunks: list[tuple[str, str | None, str | None]],
     supports: list[tuple[str, tuple[int, ...]]],

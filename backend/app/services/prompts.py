@@ -188,3 +188,59 @@ Return:
 - source_assessments: one per source id: supports | contradicts | partially_supports | unclear | irrelevant, with a one-sentence note. Use unclear when the source is about the claim but its excerpts neither clearly support nor contradict it; do not force such a source into another stance. Keep sources that contradict your conclusion; do not drop them.
 - verdict, explanation (2-4 sentences with [S#] citations), key_findings (each tied to source ids), limitations.
 {output_language_instruction(language)}"""
+
+
+# ---------------------------------------------------------------- entailment
+
+ENTAILMENT_SYSTEM = f"""You check one thing for a fact-check of a claim about what someone said: \
+whether that person's own words, in the numbered passages, say what the claim says they said.
+{_UNTRUSTED_NOTE}
+Use only the passages. Do not use background knowledge, and do not assume the claim is true or \
+false.
+- speakers: for each passage, speaker_is_named is true only if the passage itself shows that \
+the words are spoken or written by the person the claim names. Names may be transliterated or \
+translated (Ivanov = Иванов). A moderator, interviewer, reporter or anyone else is not that \
+person, even when they mention them or repeat the claim.
+- parts: split the claim into every separate assertion about what the person said (each \
+statement, with its numbers, dates and conditions); a simple claim is one part. Do not drop a \
+part because it is hard to check.
+- For each part and each passage, judge the named person's words only:
+  - entails: their words state this part. A paraphrase or a translation (Russian <-> English) \
+counts if nothing changes: same meaning, polarity (negation), numbers, quantities, dates, time \
+frame, subject and object. What their words imply or would cause is not what they said.
+  - contradicts: their words state the opposite or something incompatible (a different number, \
+date or position on the same point).
+  - neutral: anything else. Words on another topic, or on the same topic without stating this \
+part; a question; a hypothetical or conditional ("if..."); sarcasm; quoting or describing \
+someone else's view; a statement about a different time than the part specifies. When unsure, \
+choose neutral.
+- If the claim quotes exact words (in quotation marks), that part is about the words: entails \
+means the person spoke or wrote them (in another language: a faithful translation of them). \
+Whether they mislead out of context is judged elsewhere. For a paraphrase, the person's own \
+assertion is what counts: describing or quoting someone else's view is neutral."""
+
+
+def entailment_prompt(
+    *, claim: str, speaker: str, passages: list[tuple[str, str]], translated_quote: bool
+) -> str:
+    who = (
+        f"\nPerson the claim names: <untrusted>{untrusted_line(speaker)}</untrusted>"
+        if speaker
+        else "\nThe person is the one the claim names."
+    )
+    note = (
+        "\nThe claim's quoted words are in another language than the passages: a faithful "
+        "translation can match, a loose one cannot."
+        if translated_quote
+        else ""
+    )
+    blocks = "\n\n".join(
+        f"[{pid}]\n<untrusted>{escape_untrusted(text)}</untrusted>" for pid, text in passages
+    )
+    return f"""Claim about what was said:
+<untrusted>{escape_untrusted(claim)}</untrusted>{who}{note}
+
+Passages:
+{blocks}
+
+Return speakers (one per passage id) and parts (each with a relation for every passage id)."""
