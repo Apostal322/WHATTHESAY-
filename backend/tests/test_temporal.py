@@ -79,6 +79,8 @@ async def test_old_footage_uploaded_recently_is_not_judged_as_of_the_upload_date
         assert "on or before that date, possibly years earlier" in prompt
         assert "Do not assume it was said on the publication date" in prompt
         assert "Judge the claim as of" not in prompt
+    assert "prefer mixed or insufficient_evidence" in evaluation
+    assert "prefer mixed" not in analysis  # search planning gets the facts, not verdict rules
 
 
 async def test_a_date_shown_in_the_video_is_used_with_the_upload_date_as_bound(

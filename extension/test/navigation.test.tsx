@@ -178,4 +178,17 @@ describe("claim-to-video binding", () => {
     await user.click(await screen.findByRole("button", { name: /verify claim at 12:35/i }));
     expect(await screen.findByTestId("claim-origin")).toHaveTextContent("Said: 1998-05 (shown in the video)");
   });
+
+  it("never offers the previous check while another one is running", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<VerifyResponse>();
+    const verifyClaim = vi.fn().mockImplementationOnce(fakeApi().verifyClaim).mockReturnValue(pending.promise);
+    render(<App api={fakeApi({ verifyClaim })} videoSource={staticVideoSource(OK_CONTEXT)} />);
+    await finishCheck(user);
+    await user.click(screen.getByRole("button", { name: /new check/i }));
+    expect(screen.getByRole("button", { name: /show the previous check/i })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /verify claim at 12:35/i }));
+    await user.click(await screen.findByRole("button", { name: /check this claim/i }));
+    expect(screen.queryByRole("button", { name: /show the previous check/i })).toBeNull();
+  });
 });

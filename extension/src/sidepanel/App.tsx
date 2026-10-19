@@ -188,7 +188,8 @@ export function App({ api, videoSource }: Props) {
             onNewCheck={reset}
           />
         )}
-        {previous && previous !== state && state.phase !== "extracting" && (
+        {/* Only when nothing would be lost: no check running, no draft being edited. */}
+        {previous && previous !== state && (state.phase === "idle" || state.phase === "complete") && (
           <button type="button" className="btn btn-link" onClick={showPrevious}>
             Show the previous check
             {previous.origin?.videoTitle ? ` (${previous.origin.videoTitle})` : ""}

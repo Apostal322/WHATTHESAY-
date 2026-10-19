@@ -125,7 +125,7 @@ dates do not. Fixed: H-28, H-29.
 | Check | Result |
 |---|---|
 | Backend `pytest` | **433 passed, 0 xfailed** (was 383 passed, 1 xfailed) |
-| Extension `vitest` | **64 passed** (was 55) |
+| Extension `vitest` | **65 passed** (was 55) |
 | ruff, ruff format, mypy (strict), tsc, build, remote-code check | clean |
 | Browser smoke | 15/15 checks |
 | Secret scan, doc links | 0 findings; 27 files, 0 broken links |

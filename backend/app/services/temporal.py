@@ -99,22 +99,29 @@ class TemporalContext:
     def cache_part(self) -> str:
         return f"{self.said_on or ''}<={self.said_by or ''}"
 
-    def prompt_text(self) -> str:
+    def prompt_text(self, *, evaluating: bool = True) -> str:
+        """What the model is told. Search planning gets the facts; the evaluator also the rules."""
         if self.said_on:
             bound = f" The video was published on {self.said_by}." if self.said_by else ""
-            return (
-                f"\nWhen it was said: {self.said_on} (from the video itself, or the user).{bound} "
-                "Judge the claim as of that time: later events cannot make it false, but later "
+            rule = (
+                " Judge the claim as of that time: later events cannot make it false, but later "
                 "reporting about that time still counts."
             )
+            return (
+                f"\nWhen it was said: {self.said_on} (from the video itself, or the user).{bound}"
+                + (rule if evaluating else "")
+            )
         if self.said_by:
+            rule = (
+                " If the verdict depends on when it was said and the claim or context does not "
+                "establish it, say so in limitations and prefer mixed or insufficient_evidence "
+                "over judging it against the wrong period."
+            )
             return (
                 f"\nWhen it was said: unknown. The video was published on {self.said_by}, so it "
                 "was said on or before that date, possibly years earlier (archival footage, a "
                 "compilation, a rebroadcast or a re-upload). Do not assume it was said on the "
-                "publication date. If the verdict depends on when it was said and the claim or "
-                "context does not establish it, say so in limitations and prefer mixed or "
-                "insufficient_evidence over judging it against the wrong period."
+                "publication date." + (rule if evaluating else "")
             )
         return ""
 

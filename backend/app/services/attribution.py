@@ -206,9 +206,6 @@ class Passage:
     id: str
     source: EvidenceSource
     text: str
-    # The speaker was identified from the passage itself (label or name in the same script).
-    # If False, only the entailment stage can say who is speaking.
-    speaker_matched: bool
 
 
 @dataclass(frozen=True)
@@ -287,14 +284,9 @@ def check_attribution_evidence(
     # Page text first: it is what the authenticity rule trusts most.
     ordered = sorted(basis, key=lambda s: s.origin != "page_text")
     excerpts = [(s, e) for s in ordered for e in s.excerpts if own_words(e)][:MAX_PASSAGES]
+    # Who is speaking is always confirmed by the entailment stage too, not only by spelling.
     passages = tuple(
-        Passage(
-            id=f"P{i}",
-            source=s,
-            text=e[:MAX_PASSAGE_CHARS],
-            speaker_matched=has_direct_speech(e, attribution.speaker_tokens)
-            and not _cross_script(names, e),
-        )
+        Passage(id=f"P{i}", source=s, text=e[:MAX_PASSAGE_CHARS])
         for i, (s, e) in enumerate(excerpts, 1)
     )
     return AttributionCheck(verdict, passages=passages, translated_quote=translated)

@@ -288,7 +288,7 @@ class VerificationService:
                 claim=req.claim,
                 context=req.context,
                 language=req.language,
-                temporal=when.prompt_text(),
+                temporal=when.prompt_text(evaluating=False),
             ),
             schema=ClaimAnalysisOutput,
         )
