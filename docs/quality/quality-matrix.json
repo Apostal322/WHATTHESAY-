@@ -1104,6 +1104,41 @@
       ],
       "limitation": "-",
       "owner": "Frontend"
+    },
+    {
+      "id": "security.exposed_key_blocked",
+      "area": "security",
+      "priority": "P0",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "The exposed development key is never used, even if configured",
+      "implementation": "REVOKED_KEY_FINGERPRINTS checked in GeminiClient before any request (H-32)",
+      "test": "Client refuses a listed key; API answers backend_misconfigured; the exposed key's fingerprint is listed",
+      "observed": "Pass; in the sandbox a verify_claim run with the configured (exposed) key is refused and writes nothing",
+      "evidence": [
+        "backend/tests/test_hardening2.py::test_a_revoked_key_is_refused_before_any_request",
+        "backend/tests/test_hardening2.py::test_api_answers_misconfigured_with_a_revoked_key"
+      ],
+      "limitation": "Only keys on the list are refused; rotation in Google AI Studio is still required",
+      "owner": "Owner + Backend"
+    },
+    {
+      "id": "validation.live_run_provenance",
+      "area": "live",
+      "priority": "P0",
+      "status": "PASS",
+      "validation": "unit",
+      "requirement": "A live fact-check is reproducible and reviewable: exact model calls, sources, versions, commit, errors, and a review checklist",
+      "implementation": "scripts/verify_claim.py: RecordingLLM, run meta, --plan, --reference CASE:Pn, review sheet (H-33)",
+      "test": "Every call recorded (prompt, raw output, usage, latency, model); failed call recorded with its error; key never written",
+      "observed": "Pass with a scripted model (mechanics only; no live run)",
+      "evidence": [
+        "backend/tests/test_verify_claim_script.py::test_every_model_call_is_recorded_exactly",
+        "backend/tests/test_verify_claim_script.py::test_a_failed_call_is_recorded_with_its_error",
+        "backend/tests/test_verify_claim_script.py::test_an_artifact_containing_the_api_key_is_never_written"
+      ],
+      "limitation": "Live retrieval changes over time: a rerun is comparable, not identical",
+      "owner": "Owner + AI/ML"
     }
   ]
 }

@@ -167,3 +167,97 @@ async def test_artifact_and_sheet_carry_the_reference_score(settings: Settings) 
     a = vc.artifact(item, resp, err, 1, {})
     assert a["reference_score"]["outcome"] == "no_verdict"
     assert "PROVISIONAL" in vc.render_markdown(a)
+
+
+# ------------------------------------------- provenance for the first live run (mechanics only)
+
+ATTRIBUTION_ANALYSIS = {**ANALYSIS_FACTUAL, "attributed_to": "Donald Trump"}
+ATTRIBUTION_EVAL = {
+    "source_assessments": [
+        {"source_id": "S1", "stance": "supports", "note": "n"},
+        {"source_id": "S2", "stance": "supports", "note": "n"},
+    ],
+    "verdict": "supported",
+    "explanation": "He said so [S1][S2].",
+    "key_findings": [],
+    "limitations": [],
+}
+
+
+def _attribution_llm(entailment: object) -> FakeLLM:
+    return FakeLLM(
+        json_responses={
+            "ClaimAnalysisOutput": ATTRIBUTION_ANALYSIS,
+            "EvaluationOutput": ATTRIBUTION_EVAL,
+            "EntailmentOutput": entailment,
+        },
+        # Grounding excerpts are summaries: the speaker's words must come from two independent
+        # origins before the entailment check runs at all.
+        grounded=make_grounded(
+            chunks=[
+                ("https://www.foxnews.com/politics/x", "Fox News", "foxnews.com"),
+                ("https://apnews.com/article/y", "AP News", "apnews.com"),
+            ],
+            supports=[
+                ('Trump said of Amendment 4: "I will be voting no."', (0,)),
+                ('Trump told Fox News: "I will be voting no" on Amendment 4.', (1,)),
+            ],
+        ),
+    )
+
+
+async def test_every_model_call_is_recorded_exactly(settings: Settings) -> None:
+    from tests.conftest import judge_passages
+
+    llm = _attribution_llm(judge_passages("entails"))
+    item = vc.load_input(
+        _args(claim="In late August 2024 Donald Trump said he would vote against Amendment 4.",
+              id="en-debate-1200-p2", statement_date="2024-08", video_published_date=None)
+    )  # fmt: skip
+    calls: list[dict[str, object]] = []
+    resp, err, _ = await vc.run(item, settings, llm, calls=calls)
+    assert err is None and resp is not None
+    assert [c["operation"] for c in calls] == [
+        "ClaimAnalysisOutput", "grounded_search", "EvaluationOutput", "EntailmentOutput",
+    ]  # fmt: skip
+    for c in calls:  # exact prompt, raw output, usage, latency, model for each call
+        assert c["prompt"] and c["raw_output"] is not None and c["usage"] and c["model_served"]
+        assert isinstance(c["latency_ms"], int)
+    assert calls[1]["grounding"]["sources"][0]["uri"] == "https://www.foxnews.com/politics/x"
+    assert resp.attribution_check is not None and len(resp.attribution_check.passages) == 2
+    assert '"I will be voting no."' in str(calls[3]["prompt"])  # what the check saw
+    assert "When it was said: 2024-08" in str(calls[0]["prompt"])  # the date reached the model
+
+    a = vc.artifact(item, resp, None, 5, {"live": False}, calls, "en-debate-1200:P2")
+    assert a["model_calls_summary"]["model_calls"] == 4
+    assert a["reference_score"]["reference"] == "en-debate-1200:P2"
+    assert a["reference_score"]["counted"] is False  # AI-reviewed reference: provisional
+    assert a["verification"]["attribution_check"]["status"] == "confirmed"
+    md = vc.render_markdown(a)
+    for heading in ("Speaker's-words check", "Model calls", "Review checklist", "Safeguards"):
+        assert heading in md
+
+
+async def test_a_failed_call_is_recorded_with_its_error(settings: Settings) -> None:
+    from app.core.errors import ProviderQuotaExhaustedError
+
+    llm = _attribution_llm(ProviderQuotaExhaustedError("quota", diagnostics={"http_status": 429}))
+    item = vc.load_input(
+        _args(claim="Donald Trump said he would vote against Amendment 4.", id="m")
+    )
+    calls: list[dict[str, object]] = []
+    resp, err, _ = await vc.run(item, settings, llm, calls=calls)
+    assert err is None and resp is not None
+    assert resp.verdict == "insufficient_evidence"  # the check failed: no confident verdict
+    assert calls[-1]["error"]["code"] == "provider_quota_exhausted"  # type: ignore[index]
+    md = vc.render_markdown(vc.artifact(item, resp, None, 5, {}, calls))
+    assert "provider_quota_exhausted" in md and "failure `provider_error:" in md
+
+
+def test_an_artifact_containing_the_api_key_is_never_written(tmp_path: Path) -> None:
+    item = vc.load_input(_args(claim="AI replaced 80% of engineers.", id="m"))
+    leaked = vc.artifact(item, None, None, 0, {"note": "AIzaFAKE-not-a-real-key-123"})
+    with pytest.raises(SystemExit):
+        vc.write_outputs(leaked, "AIzaFAKE-not-a-real-key-123", tmp_path)  # secret-scan: allow
+    assert list(tmp_path.iterdir()) == []
+    assert vc.write_outputs(leaked, "a-different-key-456", tmp_path)  # secret-scan: allow

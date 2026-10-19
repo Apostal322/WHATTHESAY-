@@ -48,6 +48,12 @@ def fingerprint(secret: str | None) -> str | None:
     return hashlib.sha256(secret.encode()).hexdigest()[:12] if secret else None
 
 
+def key_is_revoked(secret: str | None) -> bool:
+    from app.services.llm import REVOKED_KEY_FINGERPRINTS
+
+    return fingerprint(secret) in REVOKED_KEY_FINGERPRINTS
+
+
 def classify_network(exc: Exception) -> str:
     text = f"{type(exc).__name__} {exc}".lower()
     if isinstance(exc, httpx.ProxyError) or ("403" in text and "proxy" in text):
@@ -96,6 +102,9 @@ async def live_checks(settings: Any, http: httpx.AsyncClient) -> dict[str, Any]:
     key = settings.gemini_api_key
     if key is None:
         out["gemini_generate"] = out["gemini_grounding"] = {"status": "not_configured"}
+    elif key_is_revoked(key.get_secret_value()):
+        # The exposed key: no request is sent with it, whatever it would return.
+        out["gemini_generate"] = out["gemini_grounding"] = {"status": "revoked_key_not_used"}
     else:
         llm = GeminiClient(key.get_secret_value(), timeout_sec=30, max_retries=0)
         model = settings.verification_model
@@ -147,6 +156,9 @@ async def main() -> int:
         "configuration": {
             "gemini_key": "set" if s.gemini_api_key else "missing",
             "gemini_key_fingerprint": fingerprint(
+                s.gemini_api_key.get_secret_value() if s.gemini_api_key else None
+            ),
+            "gemini_key_is_the_exposed_one": key_is_revoked(
                 s.gemini_api_key.get_secret_value() if s.gemini_api_key else None
             ),
             "brave_key": "set" if s.brave_api_key else "missing",

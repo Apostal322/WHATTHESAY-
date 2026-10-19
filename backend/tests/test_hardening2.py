@@ -260,3 +260,38 @@ async def test_concurrent_requests_with_different_dates_are_not_coalesced(
     other = VerifyRequest(claim="The bridge opened in 2019.", statement_date="2015")
     await asyncio.gather(svc.verify(same), svc.verify(same), svc.verify(other))
     assert r.calls == 2  # the two identical ones shared a run; the other date did not
+
+
+# ----------------------------------------- the exposed development key is refused in code
+
+
+def test_a_revoked_key_is_refused_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.errors import ConfigurationError
+    from app.services import llm
+
+    fake = "fake-exposed-key-for-tests"  # secret-scan: allow (not a real key)
+    monkeypatch.setattr(llm, "REVOKED_KEY_FINGERPRINTS", frozenset({llm.key_fingerprint(fake)}))
+    with pytest.raises(ConfigurationError, match="exposed"):
+        llm.GeminiClient(fake, timeout_sec=1, max_retries=0)
+    llm.GeminiClient("another-fake-key", timeout_sec=1, max_retries=0)  # secret-scan: allow
+
+
+def test_the_exposed_key_fingerprint_is_on_the_list() -> None:
+    from app.services.llm import REVOKED_KEY_FINGERPRINTS
+
+    assert "0ff24a559e0c" in REVOKED_KEY_FINGERPRINTS  # the key exposed on 2026-10-13
+
+
+def test_api_answers_misconfigured_with_a_revoked_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from app.services import llm
+
+    fake = "fake-exposed-key-for-tests"  # secret-scan: allow (not a real key)
+    monkeypatch.setattr(llm, "REVOKED_KEY_FINGERPRINTS", frozenset({llm.key_fingerprint(fake)}))
+    s = Settings(GEMINI_API_KEY=fake, _env_file=None)  # type: ignore[call-arg]
+    with TestClient(create_app(s)) as client:
+        r = client.post("/v1/claims/verify", json={"claim": "The bridge opened in 2019."})
+    assert r.status_code == 503 and r.json()["error"]["code"] == "backend_misconfigured"
+    assert "exposed" in r.json()["error"]["message"]

@@ -8,6 +8,7 @@ google-genai SDK; tests substitute a deterministic fake.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -20,6 +21,7 @@ from pydantic import BaseModel
 
 from app.core.errors import (
     AppError,
+    ConfigurationError,
     InvalidModelOutputError,
     MissingCredentialsError,
     ModelNotFoundError,
@@ -193,6 +195,16 @@ def parse_grounding(
     return sources, supports, list(meta.web_search_queries or []), True
 
 
+# Keys known to be exposed (12-character SHA-256 prefixes, as scripts/diagnose_env.py prints them).
+# The client refuses them even if they still work: the exposed development key of 2026-10-13.
+REVOKED_KEY_FINGERPRINTS = frozenset({"0ff24a559e0c"})
+
+
+def key_fingerprint(key: str) -> str:
+    """A short, non-reversible identifier for a key: safe to print and compare."""
+    return hashlib.sha256(key.encode()).hexdigest()[:12]
+
+
 class GeminiClient:
     def __init__(
         self,
@@ -204,6 +216,11 @@ class GeminiClient:
         fallback_model: str | None = None,
         daily_call_limit: int | None = None,
     ) -> None:
+        if api_key and key_fingerprint(api_key) in REVOKED_KEY_FINGERPRINTS:
+            raise ConfigurationError(
+                "This Gemini API key was exposed and must not be used. Create a new key and put "
+                "it in .env (docs/beta-validation-windows.md, step 0)."
+            )
         # A missing key is reported on first use, so input validation errors surface first
         # and the server can start (and serve /health) without credentials.
         self._has_key = bool(api_key)
