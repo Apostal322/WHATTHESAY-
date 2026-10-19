@@ -54,7 +54,10 @@ from app.services.llm import (
 )
 from app.services.verification import VERIFICATION_POLICY_VERSION, VerificationService
 
-OUT_DIR = REPO / "eval" / "factchecks"
+# Live artifacts hold full prompts and raw model outputs: git-ignored (eval/runs/), kept local.
+OUT_DIR = REPO / "eval" / "runs" / "live-factchecks"
+# A run makes at most 4 model calls (analysis, retrieval, evaluation, speaker's-words check).
+MAX_CALLS_PER_RUN = 4
 REFERENCE_DIR = REPO / "eval" / "reference"
 
 
@@ -96,6 +99,113 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+class ExperimentBudgetExhausted(AppError):
+    code = "experiment_budget_exhausted"
+    status_code = 429
+
+
+class CallLedger:
+    """Model-call budget shared by every run of an experiment, across processes and restarts.
+
+    Each call is written to the ledger *before* it is sent (status `started`) and settled
+    afterwards, so failed and interrupted calls count too. No prompts or outputs are stored
+    here: only what was called, when, its outcome, tokens and estimated cost.
+    """
+
+    def __init__(
+        self, path: Path, budget_calls: int, budget_usd: float, prices: dict[str, float | None]
+    ) -> None:
+        self.path = path
+        self.budget_calls = budget_calls
+        self.budget_usd = budget_usd
+        self.prices = prices
+        self.data: dict[str, Any] = (
+            json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"entries": []}
+        )
+        self.data["budget"] = {"calls": budget_calls, "usd": budget_usd}
+
+    @property
+    def entries(self) -> list[dict[str, Any]]:
+        return self.data["entries"]  # type: ignore[no-any-return]
+
+    def used_calls(self) -> int:
+        return len(self.entries)
+
+    def remaining_calls(self) -> int:
+        return max(0, self.budget_calls - self.used_calls())
+
+    def spent_usd(self) -> float:
+        return round(sum(e.get("est_cost_usd") or 0.0 for e in self.entries), 6)
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "path": str(self.path),
+            "budget_calls": self.budget_calls,
+            "used_calls": self.used_calls(),
+            "remaining_calls": self.remaining_calls(),
+            "failed_calls": sum(1 for e in self.entries if e.get("status") != "ok"),
+            "budget_usd": self.budget_usd,
+            "estimated_spend_usd": self.spent_usd(),
+            "calls_with_unknown_cost": sum(
+                1 for e in self.entries if e.get("est_cost_usd") is None
+            ),
+        }
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+        tmp.replace(self.path)
+
+    def reserve(self, run_id: str, operation: str, model: str) -> int:
+        if self.used_calls() >= self.budget_calls:
+            raise ExperimentBudgetExhausted(
+                f"Experiment call budget used up ({self.used_calls()}/{self.budget_calls})."
+            )
+        if self.spent_usd() >= self.budget_usd:
+            raise ExperimentBudgetExhausted(
+                f"Experiment cost budget used up (about ${self.spent_usd()} of ${self.budget_usd})."
+            )
+        self.entries.append(
+            {
+                "seq": self.used_calls() + 1,
+                "run_id": run_id,
+                "operation": operation,
+                "model_requested": model,
+                "started_at": datetime.now(UTC).isoformat(timespec="milliseconds"),
+                "status": "started",
+            }
+        )
+        self._save()
+        return len(self.entries) - 1
+
+    def estimate(self, usage: dict[str, Any] | None, search_queries: int = 0) -> float | None:
+        p_in, p_out = self.prices.get("input_per_M"), self.prices.get("output_per_M")
+        p_search = self.prices.get("search_per_1k")
+        if usage is None or p_in is None or p_out is None:
+            return None  # a failed call's billing is unknown: never assumed free
+        cost = (usage.get("prompt_tokens") or 0) * p_in / 1e6
+        cost += (usage.get("output_tokens") or 0) * p_out / 1e6
+        if search_queries:
+            if p_search is None:
+                return None
+            cost += search_queries * p_search / 1000
+        return round(cost, 6)
+
+    def settle(self, idx: int, entry: dict[str, Any]) -> None:
+        queries = len((entry.get("grounding") or {}).get("queries") or [])
+        self.entries[idx].update(
+            status="error" if "error" in entry else "ok",
+            model_served=entry.get("model_served"),
+            latency_ms=entry.get("latency_ms"),
+            usage=entry.get("usage"),
+            search_queries=queries,
+            est_cost_usd=self.estimate(entry.get("usage"), queries),
+            error_code=(entry.get("error") or {}).get("code"),
+        )
+        self._save()
+
+
 class RecordingLLM:
     """Wraps the real client and keeps every call exactly as made and answered.
 
@@ -105,11 +215,26 @@ class RecordingLLM:
     error code and message on failure. Nothing here is rewritten or summarised.
     """
 
-    def __init__(self, inner: LLMClient, calls: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        inner: LLMClient,
+        calls: list[dict[str, Any]],
+        ledger: CallLedger | None = None,
+        run_id: str = "",
+    ) -> None:
         self._inner = inner
         self.calls = calls
+        self._ledger = ledger
+        self._run_id = run_id
+        self._slots: dict[int, int] = {}  # call seq -> ledger index
+
+    def _settle(self, entry: dict[str, Any]) -> None:
+        if self._ledger is not None and entry["seq"] in self._slots:
+            self._ledger.settle(self._slots[entry["seq"]], entry)
 
     def _start(self, operation: str, model: str, system: str, prompt: str) -> dict[str, Any]:
+        # The ledger is written before the request: a refused reservation sends nothing.
+        slot = self._ledger.reserve(self._run_id, operation, model) if self._ledger else None
         entry: dict[str, Any] = {
             "seq": len(self.calls) + 1,
             "operation": operation,
@@ -120,6 +245,8 @@ class RecordingLLM:
             "prompt": prompt,
         }
         self.calls.append(entry)
+        if slot is not None:
+            self._slots[entry["seq"]] = slot
         return entry
 
     @staticmethod
@@ -150,6 +277,7 @@ class RecordingLLM:
             )
         except Exception as exc:
             self._fail(entry, exc, t0)
+            self._settle(entry)
             raise
         entry.update(
             latency_ms=int((time.perf_counter() - t0) * 1000),
@@ -157,6 +285,7 @@ class RecordingLLM:
             usage=dataclasses.asdict(res.usage),
             raw_output=res.text,
         )
+        self._settle(entry)
         return res
 
     async def grounded_search(self, *, model: str, system: str, prompt: str) -> GroundedResult:
@@ -166,6 +295,7 @@ class RecordingLLM:
             res = await self._inner.grounded_search(model=model, system=system, prompt=prompt)
         except Exception as exc:
             self._fail(entry, exc, t0)
+            self._settle(entry)
             raise
         entry.update(
             latency_ms=int((time.perf_counter() - t0) * 1000),
@@ -179,6 +309,7 @@ class RecordingLLM:
                 "raw_metadata_present": res.raw_metadata_present,
             },
         )
+        self._settle(entry)
         return res
 
 
@@ -251,8 +382,35 @@ def load_input(args: argparse.Namespace) -> dict[str, Any]:
             "statement_date": ext.get("statement_date"),
             "video_published_date": None,
         }
+    if getattr(args, "proposition", None):
+        case, _, pid = args.proposition.partition(":")
+        path = REFERENCE_DIR / f"{case}.json"
+        if not pid or not path.exists():
+            raise SystemExit(
+                f"--proposition must be CASE:Pn with eval/reference/CASE.json ({path})"
+            )
+        ref = ReferenceRecord.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        prop = ref.proposition(pid)
+        return {
+            "id": args.id or f"{case}-{pid.lower()}",
+            # The claim is the reference proposition, word for word: not user- or video-sourced.
+            "input_method": "reference_proposition",
+            "proposition": {
+                "case": case,
+                "id": pid,
+                "kind": prop.kind,
+                "reference_review_status": ref.review.status,
+            },
+            "claim": prop.text,
+            "context": ref.context,
+            "language": args.language,
+            "video": None,
+            "extraction": None,
+            "statement_date": getattr(args, "statement_date", None),
+            "video_published_date": getattr(args, "video_published_date", None),
+        }
     if not args.claim:
-        raise SystemExit("give --from-run/--case or --claim")
+        raise SystemExit("give --proposition, --from-run/--case or --claim")
     return {
         "id": args.id or "manual",
         "input_method": "manual",
@@ -494,7 +652,16 @@ async def run(
     settings: Settings,
     llm: LLMClient | None = None,
     calls: list[dict[str, Any]] | None = None,
+    ledger: CallLedger | None = None,
 ) -> tuple[VerifyResponse | None, AppError | None, int]:
+    if ledger is not None:
+        problems = ledger_preconditions(settings, ledger)
+        if problems:
+            raise SystemExit("not started: " + "; ".join(problems))
+        # Never more calls in this run than the experiment has left (and at most 4).
+        settings = settings.model_copy(
+            update={"gemini_daily_call_limit": min(MAX_CALLS_PER_RUN, ledger.remaining_calls())}
+        )
     if llm is None:
         key = settings.gemini_api_key
         if not key:
@@ -510,7 +677,7 @@ async def run(
         except AppError as exc:  # e.g. the exposed key: refused before any request
             raise SystemExit(exc.message) from None
     if calls is not None:
-        llm = RecordingLLM(llm, calls)
+        llm = RecordingLLM(llm, calls, ledger, item["id"])
     async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as http:
         retriever = (
             build_search_retriever(settings, http)
@@ -534,7 +701,37 @@ async def run(
             return None, exc, int((time.perf_counter() - started) * 1000)
 
 
-def run_plan(item: dict[str, Any], settings: Settings, reference: str | None) -> dict[str, Any]:
+def ledger_preconditions(settings: Settings, ledger: CallLedger) -> list[str]:
+    """Why a budgeted run must not start (empty: it may). Retries and fallback calls would be
+    requests the ledger cannot see, and an unknown price makes the cost budget meaningless."""
+    problems = []
+    if settings.max_retries != 0:
+        problems.append("YOUVERIFY_MAX_RETRIES must be 0 (retries are invisible to the ledger)")
+    if settings.fallback_model:
+        problems.append("YOUVERIFY_FALLBACK_MODEL must be unset (fallback calls are invisible)")
+    if None in (ledger.prices.get("input_per_M"), ledger.prices.get("output_per_M")):
+        problems.append("give --price-in and --price-out so the cost budget can be enforced")
+    if (
+        settings.retrieval_backend == "gemini_grounding"
+        and ledger.prices.get("search_per_1k") is None
+    ):
+        problems.append("give --price-search-1k: grounding queries are billed")
+    if ledger.remaining_calls() < MAX_CALLS_PER_RUN:
+        problems.append(
+            f"only {ledger.remaining_calls()} calls left in the experiment budget; a run may "
+            f"need {MAX_CALLS_PER_RUN}"
+        )
+    if ledger.spent_usd() >= ledger.budget_usd:
+        problems.append("the experiment cost budget is used up")
+    return problems
+
+
+def run_plan(
+    item: dict[str, Any],
+    settings: Settings,
+    reference: str | None,
+    ledger: CallLedger | None = None,
+) -> dict[str, Any]:
     """What a run would do, without any call: check it before spending quota."""
     limit, retries = settings.gemini_daily_call_limit, settings.max_retries
     warnings = []
@@ -544,8 +741,10 @@ def run_plan(item: dict[str, Any], settings: Settings, reference: str | None) ->
         warnings.append("GEMINI_API_KEY is the exposed key: it is refused; create a new one")
     if retries != 0:
         warnings.append("YOUVERIFY_MAX_RETRIES is not 0: calls are not exactly bounded")
-    if limit is None or limit > 4:
+    if ledger is None and (limit is None or limit > 4):
         warnings.append("YOUVERIFY_GEMINI_DAILY_CALL_LIMIT should be 4 (per run, per process)")
+    if ledger is not None:
+        warnings += [p for p in ledger_preconditions(settings, ledger) if "RETRIES" not in p]
     if settings.fallback_model:
         warnings.append("a fallback model is set: an overloaded call may be retried on it")
     git = git_state()
@@ -566,7 +765,55 @@ def run_plan(item: dict[str, Any], settings: Settings, reference: str | None) ->
         "gemini_key_set": bool(settings.gemini_api_key),  # never the key or its fingerprint here
         "git": git,
         "verification_policy_version": VERIFICATION_POLICY_VERSION,
+        "input_method": item.get("input_method"),
+        "experiment_budget": ledger.status() if ledger else None,
         "warnings": warnings,
+    }
+
+
+def summarize(out_dir: Path) -> dict[str, Any]:
+    """Measured figures over every run artifact in `out_dir`; counts, never averages alone."""
+    runs = []
+    for path in sorted(out_dir.glob("*.json")):
+        if path.name in ("call-ledger.json", "metrics.json") or path.name.startswith("plan-"):
+            continue
+        a = json.loads(path.read_text(encoding="utf-8"))
+        if "run_meta" not in a:
+            continue
+        v = a.get("verification") or {}
+        calls = a.get("model_calls") or []
+        runs.append(
+            {
+                "file": path.name,
+                "id": a["id"],
+                "input_method": a.get("input_method"),
+                "live": (a.get("run_meta") or {}).get("live"),
+                "commit": ((a.get("run_meta") or {}).get("git") or {}).get("commit"),
+                "outcome": v.get("error") or v.get("verdict"),
+                "safeguards": [x["rule"] for x in v.get("verdict_adjustments") or []],
+                "speakers_words_check": (v.get("attribution_check") or {}).get("status"),
+                "sources": len(v.get("sources") or []),
+                "end_to_end_ms": a.get("latency_ms"),
+                "model_calls": a.get("model_calls_summary"),
+                "per_call_ms": {c["operation"]: c.get("latency_ms") for c in calls},
+                "estimated_cost_usd": (v.get("usage") or {}).get("estimated_cost_usd"),
+                "reference_outcome": (a.get("reference_score") or {}).get("outcome"),
+                "review_status": (a.get("review") or {}).get("status"),
+            }
+        )
+    ledger_path = out_dir / "call-ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.exists() else None
+    entries = (ledger or {}).get("entries") or []
+    return {
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "runs": runs,
+        "n_runs": len(runs),
+        "ledger": {
+            "calls": len(entries),
+            "failed_or_unfinished": sum(1 for e in entries if e.get("status") != "ok"),
+            "estimated_spend_usd": round(sum(e.get("est_cost_usd") or 0 for e in entries), 6),
+            "calls_with_unknown_cost": sum(1 for e in entries if e.get("est_cost_usd") is None),
+        },
     }
 
 
@@ -606,12 +853,33 @@ def main() -> int:
         "--reference",
         help="score against eval/reference/<case>.json, or one proposition as CASE:P2",
     )
+    ap.add_argument(
+        "--proposition",
+        help="check a reference proposition word for word, as CASE:Pn (scored against it)",
+    )
+    ap.add_argument("--out-dir", type=Path, default=OUT_DIR, help="where artifacts go (private)")
+    ap.add_argument(
+        "--budget-calls", type=int, default=8, help="model calls for the whole experiment"
+    )
+    ap.add_argument(
+        "--budget-usd", type=float, default=1.0, help="estimated spend for the whole experiment"
+    )
+    ap.add_argument(
+        "--summarize", action="store_true", help="write metrics.json for --out-dir; no calls"
+    )
     ap.add_argument("--price-in", type=float)
     ap.add_argument("--price-out", type=float)
     ap.add_argument("--price-search-1k", type=float)
     args = ap.parse_args()
 
+    out_dir: Path = args.out_dir
+    if args.summarize:
+        metrics = summarize(out_dir)
+        (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        print(json.dumps(metrics, indent=2))
+        return 0
     item = load_input(args)
+    reference = args.reference or (args.proposition if args.proposition else None)
     updates: dict[str, Any] = {"cache_ttl_sec": 0}
     for flag, field in (
         ("price_in", "price_input_per_million"),
@@ -622,12 +890,24 @@ def main() -> int:
             updates[field] = getattr(args, flag)
     settings = get_settings().model_copy(update=updates)
     configure_logging("WARNING")
+    ledger = CallLedger(
+        out_dir / "call-ledger.json",
+        args.budget_calls,
+        args.budget_usd,
+        {
+            "input_per_M": settings.price_input_per_million,
+            "output_per_M": settings.price_output_per_million,
+            "search_per_1k": settings.price_per_1k_search_queries,
+        },
+    )
     if args.plan:
-        print(json.dumps(run_plan(item, settings, args.reference), indent=2, ensure_ascii=False))
+        plan = run_plan(item, settings, reference, ledger)
+        # ASCII-escaped: a Windows console or redirect may not use UTF-8.
+        print(json.dumps(plan, indent=2))
         return 0
 
     calls: list[dict[str, Any]] = []
-    resp, error, latency = asyncio.run(run(item, settings, calls=calls))
+    resp, error, latency = asyncio.run(run(item, settings, calls=calls, ledger=ledger))
     meta = {
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "live": True,  # a real model client; tests pass their own scripted client to run()
@@ -650,10 +930,11 @@ def main() -> int:
             "search_per_1k": settings.price_per_1k_search_queries,
         },
     }
-    a = artifact(item, resp, error, latency, meta, calls, args.reference)
+    meta["experiment_budget_after_run"] = ledger.status()
+    a = artifact(item, resp, error, latency, meta, calls, reference)
     key = settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else ""
-    stem = write_outputs(a, key, OUT_DIR)
-    print(f"wrote {OUT_DIR.relative_to(REPO)}/{stem}.json and .md", file=sys.stderr)
+    stem = write_outputs(a, key, out_dir)
+    print(f"wrote {out_dir}/{stem}.json and .md", file=sys.stderr)
     return 0 if error is None else 1
 
 

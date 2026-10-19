@@ -990,14 +990,15 @@
       "validation": "live",
       "requirement": "At least one complete live fact-check with real sources",
       "implementation": "scripts/verify_claim.py",
-      "test": "Bounded live run 2026-10-15 (cap 4 calls, no retries); environment diagnostic 2026-10-19",
-      "observed": "2026-10-15: analysis live OK; Google Search grounding 429 RESOURCE_EXHAUSTED. 2026-10-19: the only available key is the exposed one (must not be used); Brave, YouTube and all publisher sites are blocked by the sandbox proxy",
+      "test": "Bounded live run 2026-10-15; experiment real-world-validation-001 on 2026-10-19 (P5 command attempted once, refused before any request)",
+      "observed": "2026-10-15: analysis live OK; Google Search grounding 429. 2026-10-19 (real-world-validation-001): the only key is the exposed one, refused in code; 0 model calls; Brave, YouTube and all publisher sites blocked by the sandbox proxy. BLOCKED BY CREDENTIALS",
       "evidence": [
         "eval/factchecks/live-smoke-eiffel-20261015T230152Z.json",
         "scripts/diagnose_env.py",
-        "docs/beta-validation-windows.md"
+        "docs/beta-validation-windows.md",
+        "docs/experiments/real-world-validation-001.md"
       ],
-      "limitation": "Owner procedure: docs/beta-validation-windows.md (rotated key, 6 calls)",
+      "limitation": "Owner procedure: docs/beta-validation-windows.md (rotated key; at most 8 calls, $1, ledger-enforced)",
       "owner": "Project owner"
     },
     {
@@ -1128,14 +1129,16 @@
       "priority": "P0",
       "status": "PASS",
       "validation": "unit",
-      "requirement": "A live fact-check is reproducible and reviewable: exact model calls, sources, versions, commit, errors, and a review checklist",
-      "implementation": "scripts/verify_claim.py: RecordingLLM, run meta, --plan, --reference CASE:Pn, review sheet (H-33)",
+      "requirement": "A live experiment is reproducible, budgeted across runs and private: exact model calls, sources, versions, commit, errors, call ledger, review checklist",
+      "implementation": "scripts/verify_claim.py: RecordingLLM, CallLedger, --plan, --proposition, --summarize, private output dir (H-33, H-34)",
       "test": "Every call recorded (prompt, raw output, usage, latency, model); failed call recorded with its error; key never written",
       "observed": "Pass with a scripted model (mechanics only; no live run)",
       "evidence": [
         "backend/tests/test_verify_claim_script.py::test_every_model_call_is_recorded_exactly",
         "backend/tests/test_verify_claim_script.py::test_a_failed_call_is_recorded_with_its_error",
-        "backend/tests/test_verify_claim_script.py::test_an_artifact_containing_the_api_key_is_never_written"
+        "backend/tests/test_verify_claim_script.py::test_an_artifact_containing_the_api_key_is_never_written",
+        "backend/tests/test_verify_claim_script.py::test_ledger_counts_every_call_across_processes",
+        "backend/tests/test_verify_claim_script.py::test_live_artifacts_go_to_a_git_ignored_directory"
       ],
       "limitation": "Live retrieval changes over time: a rerun is comparable, not identical",
       "owner": "Owner + AI/ML"

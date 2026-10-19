@@ -5,9 +5,9 @@ then a human review of it.** The development sandbox cannot do this: it reaches 
 API, and the only key it has is the one exposed in a chat (the application refuses that key).
 Run these steps on your own machine.
 
-Budget: at most **7 model calls** for step 2 (11 with the optional control) and well under
-**$1**: about $0.01–0.03 in tokens per claim at the assumed prices below, plus Google Search
-grounding fees for up to 4 queries per claim, depending on your plan.
+Budget: at most **8 model calls and about $1** for the whole experiment, enforced by a call
+ledger across runs (step 2). Prices used for the estimate: $0.75 / $3.75 per 1M tokens and $14 per
+1,000 grounding queries (assumed, unconfirmed; check your plan).
 
 ## 0. Rotate the key (required)
 
@@ -38,75 +38,81 @@ python scripts\diagnose_env.py --live
 Stop if `gemini_grounding` says `quota_exhausted`: grounding needs quota on your key (or set
 up Brave search, see `.env.example`). `overloaded` means try again later.
 
-## 2. The debate case: two fact-checks (up to 7 calls)
+## 2. The debate case: two fact-checks (at most 8 calls, $1)
 
-Case `en-debate-1200` (ABC presidential debate, 10 September 2024). Its reference record
-[`eval/reference/en-debate-1200.md`](../eval/reference/en-debate-1200.md) splits the claim into
-propositions; two are checked here, each scored against its own proposition. The reference is
-**AI-reviewed, not ground truth**: scores are provisional until a human verifies it.
+Case `en-debate-1200` (ABC presidential debate, 10 September 2024). Each run checks one
+proposition of its reference record [`eval/reference/en-debate-1200.md`](../eval/reference/en-debate-1200.md)
+**word for word** (`--proposition`) and is scored against it. The reference is **AI-reviewed,
+not ground truth**: scores are provisional until a human verifies it.
 
-Set the limits for this PowerShell session. The call limit applies **per run** (each command
-is its own process), so 4 bounds every run exactly; retries off; no fallback model:
+**Budget.** A ledger in the experiment directory (`call-ledger.json`) records every model call
+*before* it is sent, across runs and restarts: at most **8 calls and about $1** for the whole
+experiment (`--budget-calls`, `--budget-usd`), at most 4 per run. A run does not start without
+room for all its calls, and failed calls count. Retries and a fallback model would be requests
+the ledger cannot see, so a run refuses to start with either.
 
 ```powershell
-$env:YOUVERIFY_GEMINI_DAILY_CALL_LIMIT = "4"
 $env:YOUVERIFY_MAX_RETRIES = "0"
 Remove-Item Env:YOUVERIFY_FALLBACK_MODEL -ErrorAction SilentlyContinue   # and not set in .env
-$prices = @("--price-in", "0.75", "--price-out", "3.75", "--price-search-1k", "14")   # assumed, unconfirmed
+$exp = "eval\runs\real-world-validation-001"    # git-ignored: full prompts and raw outputs stay local
+$common = @("--language", "en", "--out-dir", $exp,
+  "--price-in", "0.75", "--price-out", "3.75", "--price-search-1k", "14")   # assumed, unconfirmed prices
 ```
 
-**2a. What Trump said (P2).** A claim about what someone said: analysis, grounded retrieval,
-evaluation, and, when it reaches a confident verdict, the speaker's-words check (3 or 4 calls).
+**2a. P5, what Amendment 4 would have done** (a factual claim; 3 calls). First, because it is the
+simpler case:
 
 ```powershell
-$p2 = @("--id", "en-debate-1200-p2", "--language", "en", "--reference", "en-debate-1200:P2",
-  "--statement-date", "2024-08",
-  "--claim", "In late August 2024 Donald Trump said he would vote against Florida's Amendment 4.",
-  "--context", "Reported 30 August 2024; discussed at the 10 September 2024 ABC presidential debate.")
-python scripts\verify_claim.py @p2 @prices --plan     # no calls: check the plan first
-python scripts\verify_claim.py @p2 @prices
+python scripts\verify_claim.py --proposition en-debate-1200:P5 @common --plan > "$exp\experiment-plan-p5.json"
+Get-Content "$exp\experiment-plan-p5.json"     # "warnings": [] before you go on
+python scripts\verify_claim.py --proposition en-debate-1200:P5 @common
 ```
 
-**2b. What the amendment would do (P5).** A factual claim (3 calls).
+**2b. P2, what Trump said** (about what someone said: 3 calls, or 4 with the speaker's-words
+check). The statement date is the one the reports give (event E2 in the reference record):
 
 ```powershell
-$p5 = @("--id", "en-debate-1200-p5", "--language", "en", "--reference", "en-debate-1200:P5",
-  "--claim", "Florida's 2024 Amendment 4 would have barred laws restricting abortion before viability.",
-  "--context", "Florida ballot initiative, November 2024.")
-python scripts\verify_claim.py @p5 @prices --plan
-python scripts\verify_claim.py @p5 @prices
+python scripts\verify_claim.py --proposition en-debate-1200:P2 --statement-date 2024-08-30 @common --plan > "$exp\experiment-plan-p2.json"
+Get-Content "$exp\experiment-plan-p2.json"
+python scripts\verify_claim.py --proposition en-debate-1200:P2 --statement-date 2024-08-30 @common
 ```
 
-`--plan` must show `"warnings": []` before you run; it prints the claim, dates, model, limits,
-the commit and whether it is clean. Each run writes `eval/factchecks/<id>-<time>.json` and a
-`.md` review sheet. This is **live manual-claim verification**, not video-to-verdict validation.
+**2c. Metrics** (no calls): `python scripts\verify_claim.py --summarize --out-dir $exp` writes
+`metrics.json` (per run: outcome, safeguards, calls, tokens, per-call latency, estimated cost;
+the ledger totals).
 
-**Optional control for the speaker's-words check (issue #6; 3–4 calls).** His real words ("I
-will be voting no") do not say this.
+The plan must show `"warnings": []`: no exposed key, a clean commit, retries 0, no fallback,
+prices given, enough budget left. Each run writes `<id>-<time>.json` (everything, private) and a
+`.md` review sheet into `$exp`. This is **live manual-claim verification**, not video-to-verdict.
+
+**Optional control for the speaker's-words check (issue #6; 3–4 calls).** Only with budget left
+after 2a and 2b (`--plan` says how much); otherwise it needs a separately approved budget. His
+real words ("I will be voting no") do not say this.
 
 ```powershell
-python scripts\verify_claim.py --id en-debate-1200-l1-control --language en --statement-date 2024-08 `
+python scripts\verify_claim.py --id en-debate-1200-l1-control --statement-date 2024-08-30 @common `
   --claim "In late August 2024 Donald Trump said he would vote to keep Florida's six-week abortion ban." `
-  --context "Reported 30 August 2024; discussed at the 10 September 2024 ABC presidential debate." @prices
+  --context "Reported 30 August 2024; discussed at the 10 September 2024 ABC presidential debate."
 ```
 
 ### What to expect
 
 | Run | Acceptable (reference, provisional) | A warning sign |
 |---|---|---|
-| P2 | `supported` | `contradicted`; `supported` resting on a report that only paraphrases him |
 | P5 | `supported` | `contradicted`; a verdict citing commentary instead of the amendment text or official records |
+| P2 | `supported` | `contradicted`; `supported` resting on a report that only paraphrases him |
 | Control | `insufficient_evidence` or `mixed`, with rule `attribution_not_entailed` or `attribution_without_direct_evidence` | `supported` (the issue #6 failure) |
 
-`insufficient_evidence` on P2 or P5 is not a false verdict, but it is not the milestone either:
-look at why (the sheet's safeguards and model-call table) before retrying, and count retries
-against the budget.
+`insufficient_evidence` is not a false verdict: a complete run that abstains shows the pipeline
+works, not that it can produce a source-backed verdict. Look at why (safeguards and model-call
+table in the sheet) before spending more budget. In the default grounding mode the excerpts are
+Google's summaries, not page text: the sources must be opened by the reviewer (step 3).
 
 ### What each artifact preserves
 
-- **Input:** claim, context, dates, reference proposition.
+- **Input:** the proposition (word for word, with its reference id), context, dates.
 - **Run:** UTC time, git commit and whether the tree was clean, policy and prompt versions,
-  model, retrieval mode, limits and retries.
+  model, retrieval mode, limits, and the experiment budget after the run.
 - **Every model call, exactly as made:** operation, requested and serving model, full prompt
   (with the excerpts the model saw), system-prompt hash, raw output, grounding queries, sources
   and supports, token usage, latency, and the error code if it failed.
@@ -145,12 +151,15 @@ is filled in, whatever the review concludes. A reviewed disagreement is a valid 
 That is the first **live video-to-verdict** run. Record what happened (screenshots welcome)
 in a new issue or in `eval/factchecks/`.
 
-## 5. Commit the artifacts
+## 5. Keep the artifacts private; share the reviewed sheets
+
+Everything in `eval\runs\` is git-ignored: the full prompts, raw outputs and the ledger stay on
+your machine. To share the result, copy the **reviewed** `.md` sheets (and `metrics.json`) to
+`eval/factchecks/`, then:
 
 ```powershell
 git add eval/factchecks
 python scripts\scan_secrets.py --staged
 ```
 
-The scan must report 0 findings. Then commit and open a pull request. The artifacts contain
-the prompts and the retrieved public web excerpts, never the key.
+The scan must report 0 findings. Then commit and open a pull request.

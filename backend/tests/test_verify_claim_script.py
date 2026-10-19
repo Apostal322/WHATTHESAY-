@@ -51,6 +51,7 @@ def _args(**kw: object) -> argparse.Namespace:
         "context": None,
         "language": "auto",
         "id": None,
+        "proposition": None,
     }
     return argparse.Namespace(**{**base, **kw})
 
@@ -261,3 +262,111 @@ def test_an_artifact_containing_the_api_key_is_never_written(tmp_path: Path) -> 
         vc.write_outputs(leaked, "AIzaFAKE-not-a-real-key-123", tmp_path)  # secret-scan: allow
     assert list(tmp_path.iterdir()) == []
     assert vc.write_outputs(leaked, "a-different-key-456", tmp_path)  # secret-scan: allow
+
+
+# ------------------------------------------ experiment controls: ledger, propositions, output
+
+PRICES = {"input_per_M": 0.75, "output_per_M": 3.75, "search_per_1k": 14.0}
+
+
+def _budgeted(settings: Settings) -> Settings:
+    return settings.model_copy(update={"max_retries": 0, "fallback_model": None})
+
+
+async def test_ledger_counts_every_call_across_processes(
+    tmp_path: Path, settings: Settings
+) -> None:
+    from app.core.errors import ProviderQuotaExhaustedError
+
+    path = tmp_path / "call-ledger.json"
+    ledger = vc.CallLedger(path, 8, 1.0, PRICES)
+    item = vc.load_input(
+        _args(claim="Donald Trump said he would vote against Amendment 4.", id="a")
+    )
+    llm = _attribution_llm(ProviderQuotaExhaustedError("quota"))  # the 4th call fails
+    await vc.run(item, _budgeted(settings), llm, calls=[], ledger=ledger)
+    # A new process reads the same file: the budget does not reset on restart.
+    again = vc.CallLedger(path, 8, 1.0, PRICES)
+    status = again.status()
+    assert (status["used_calls"], status["remaining_calls"], status["failed_calls"]) == (4, 4, 1)
+    failed = again.entries[-1]
+    assert failed["status"] == "error" and failed["est_cost_usd"] is None  # never assumed free
+    assert again.entries[1]["search_queries"] == 1  # grounding queries are costed
+    assert 0 < status["estimated_spend_usd"] < 1
+    stored = {k for e in again.entries for k in e}
+    assert not stored & {"prompt", "raw_output", "grounding"}  # no prompts or outputs kept
+
+
+async def test_a_run_does_not_start_without_room_for_all_its_calls(
+    tmp_path: Path, settings: Settings
+) -> None:
+    ledger = vc.CallLedger(tmp_path / "l.json", 5, 1.0, PRICES)
+    for _ in range(2):
+        ledger.settle(ledger.reserve("x", "ClaimAnalysisOutput", "m"), {"usage": {}})
+    item = vc.load_input(_args(claim="AI replaced 80% of engineers.", id="m"))
+    with pytest.raises(SystemExit, match="only 3 calls left"):
+        await vc.run(item, _budgeted(settings), FakeLLM(), calls=[], ledger=ledger)
+
+
+def test_ledger_refuses_a_call_beyond_the_budget(tmp_path: Path) -> None:
+    ledger = vc.CallLedger(tmp_path / "l.json", 1, 1.0, PRICES)
+    ledger.reserve("x", "ClaimAnalysisOutput", "m")
+    with pytest.raises(vc.ExperimentBudgetExhausted):
+        ledger.reserve("x", "EvaluationOutput", "m")
+
+
+@pytest.mark.parametrize(
+    ("update", "problem"),
+    [
+        ({"max_retries": 2}, "MAX_RETRIES must be 0"),
+        ({"fallback_model": "other"}, "FALLBACK_MODEL must be unset"),
+    ],
+)
+def test_budgeted_runs_refuse_invisible_requests(
+    tmp_path: Path, settings: Settings, update: dict[str, object], problem: str
+) -> None:
+    ledger = vc.CallLedger(tmp_path / "l.json", 8, 1.0, PRICES)
+    s = _budgeted(settings).model_copy(update=update)
+    assert any(problem in p for p in vc.ledger_preconditions(s, ledger))
+    no_prices = vc.CallLedger(tmp_path / "l.json", 8, 1.0, {})
+    assert any("--price-in" in p for p in vc.ledger_preconditions(_budgeted(settings), no_prices))
+
+
+@pytest.mark.parametrize("pid", ["P2", "P5"])
+def test_a_reference_proposition_is_checked_word_for_word(pid: str) -> None:
+    ref = json.loads((vc.REFERENCE_DIR / "en-debate-1200.json").read_text(encoding="utf-8"))
+    prop = next(p for p in ref["propositions"] if p["id"] == pid)
+    item = vc.load_input(_args(proposition=f"en-debate-1200:{pid}"))
+    assert item["claim"] == prop["text"] and item["input_method"] == "reference_proposition"
+    assert item["id"] == f"en-debate-1200-{pid.lower()}" and item["context"] == ref["context"]
+    assert item["proposition"]["reference_review_status"] == "ai_reviewed"
+
+
+async def test_summarize_reports_counts_and_measured_figures(
+    tmp_path: Path, settings: Settings
+) -> None:
+    from tests.conftest import judge_passages
+
+    ledger = vc.CallLedger(tmp_path / "call-ledger.json", 8, 1.0, PRICES)
+    item = vc.load_input(
+        _args(claim="Donald Trump said he would vote against Amendment 4.", id="a")
+    )
+    calls: list[dict[str, object]] = []
+    resp, err, ms = await vc.run(
+        item, _budgeted(settings), _attribution_llm(judge_passages("entails")), calls, ledger
+    )
+    vc.write_outputs(vc.artifact(item, resp, err, ms, {"live": False}, calls), "", tmp_path)
+    m = vc.summarize(tmp_path)
+    assert m["n_runs"] == 1 and m["ledger"]["calls"] == 4
+    (r,) = m["runs"]
+    assert (
+        r["live"] is False and r["outcome"] == "supported" and r["model_calls"]["model_calls"] == 4
+    )
+
+
+def test_live_artifacts_go_to_a_git_ignored_directory() -> None:
+    import subprocess
+
+    probe = vc.OUT_DIR.relative_to(vc.REPO) / "x.json"
+    out = subprocess.run(["git", "check-ignore", str(probe)], cwd=vc.REPO, capture_output=True)
+    assert out.returncode == 0  # full prompts and raw outputs never reach a commit by default
