@@ -76,11 +76,17 @@ export function verification(overrides: Partial<VerifyResponse> = {}): VerifyRes
 
 export function staticVideoSource(ctx: VideoContext): VideoContextSource & { set(next: VideoContext): void } {
   let current = ctx;
+  const listeners = new Set<() => void>();
   return {
     get: () => Promise.resolve(current),
-    subscribe: () => () => undefined,
+    subscribe: (onChange) => {
+      listeners.add(onChange);
+      return () => listeners.delete(onChange);
+    },
+    /** Like a navigation: the new context is announced to subscribers. */
     set(next) {
       current = next;
+      listeners.forEach((fn) => fn());
     },
   };
 }

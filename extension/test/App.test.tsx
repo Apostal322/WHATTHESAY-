@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/shared/api";
@@ -151,5 +151,22 @@ describe("App", () => {
     });
     render(<App api={api} videoSource={staticVideoSource(OK_CONTEXT)} />);
     await waitFor(() => expect(screen.getByText(/no GEMINI_API_KEY/i)).toBeInTheDocument());
+  });
+
+  it("says so when the claim comes from a video other than the one now playing", async () => {
+    const user = userEvent.setup();
+    const source = staticVideoSource(OK_CONTEXT);
+    render(<App api={fakeApi()} videoSource={source} />);
+    await user.click(await screen.findByRole("button", { name: /verify claim at 12:35/i }));
+    await screen.findByRole("textbox", { name: /claim/i });
+    expect(screen.queryByText(/from the video you were watching before/i)).not.toBeInTheDocument();
+
+    act(() =>
+      source.set({ status: "ok", videoId: "aaaaaaaaaaa", timestampSec: 10, durationSec: 600, title: "Another video", publishedDate: null }),
+    );
+    expect(await screen.findByText(/from the video you were watching before, at 12:35/i)).toBeInTheDocument();
+
+    act(() => source.set(OK_CONTEXT)); // back on the claim's own video
+    await waitFor(() => expect(screen.queryByText(/from the video you were watching before/i)).not.toBeInTheDocument());
   });
 });

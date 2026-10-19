@@ -125,12 +125,22 @@ export function App({ api, videoSource }: Props) {
 
   const videoReady = ctx?.status === "ok";
   const isManual = state.origin?.source === "manual";
+  // After the user moves on to another video, the claim and verdict still describe the first one.
+  const origin = state.origin;
+  const fromOtherVideo =
+    state.phase !== "idle" && origin?.source === "video" && ctx?.status === "ok" && origin.videoId !== ctx.videoId;
 
   return (
     <div className="app">
       <Header status={backend} language={language} onLanguageChange={setLanguage} />
       <main className="main">
         <VideoBar ctx={ctx} />
+        {fromOtherVideo && (
+          <p className="notice" role="status">
+            This claim is from the video you were watching before
+            {origin.timestampSec != null ? `, at ${formatTimestamp(origin.timestampSec)}` : ""}, not the one now playing.
+          </p>
+        )}
 
         {state.phase !== "idle" && state.phase !== "error" && <ProgressSteps phase={state.phase} stage={state.stage} manual={isManual} />}
 
