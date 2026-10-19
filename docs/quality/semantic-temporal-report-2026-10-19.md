@@ -106,7 +106,8 @@ Each check carries its video (id, title, moment, duration, upload date, clip dat
 plays, a finished or editable check is held back ("This result is for another video") until the
 user asks to see it, then shown labelled; a pending check stays bound and its result is held on
 arrival; an extraction answer for a different video is rejected; retries use the check's own
-video; the previous finished check can be brought back, still bound. Tested (10 cases): SPA
+video; the previous finished check can be brought back, still bound (never while another
+check runs). Tested (11 cases): SPA
 navigation, rapid navigation, tab switching, pending requests, returning to the video, a context
 gap (service worker restart), mismatched answers, retry details, recovery. Browser smoke: a new
 real-Chromium check that the verdict is held after navigation. Real youtube.com: **not tested**.
