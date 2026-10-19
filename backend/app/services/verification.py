@@ -479,6 +479,29 @@ class VerificationService:
                 quote_notes += check_quotations(
                     text, [by_id[sid] for sid in ids], (req.claim, normalized)
                 )
+        # The model's own evidence-backed findings can disagree with its verdict: "supported"
+        # while one finding, backed by a source assessed as contradicting, says part of the claim
+        # is false (a true fact with an unsupported cause, a real quote in misleading context).
+        # The claim is then partly supported and partly contradicted: mixed, not confident.
+        opposite = {"supported": "contradicts", "contradicted": "supports"}.get(verdict)
+        if opposite and any(f.stance == opposite for f in findings):
+            adjustments.append(
+                VerdictAdjustment(
+                    rule="verdict_contradicts_own_findings",
+                    from_verdict=verdict,
+                    to_verdict="mixed",
+                    reason=(
+                        "The evaluation's own findings, backed by the cited sources, "
+                        f"{'contradict' if opposite == 'contradicts' else 'support'} part of the "
+                        "claim, so it is neither fully supported nor fully contradicted."
+                    ),
+                )
+            )
+            notes = [n for n in notes if not n.startswith("The verdict rests on")]
+            notes.append(
+                f"Verdict changed from '{verdict}' to 'mixed': the findings disagree with it."
+            )
+            verdict = "mixed"
         if misaligned:
             notes.append(
                 f"Removed {misaligned} citation(s) from key findings: the cited source was not "
@@ -502,9 +525,12 @@ class VerificationService:
         )
         notes += list(dict.fromkeys(quote_notes))
         if verdict != evaluation.verdict:
-            explanation = (
-                "The retrieved evidence does not clearly establish a verdict. " + explanation
-            ).strip()
+            lead = (
+                "The evidence supports part of this claim and contradicts another part. "
+                if verdict == "mixed"
+                else "The retrieved evidence does not clearly establish a verdict. "
+            )
+            explanation = (lead + explanation).strip()
 
         # Show sources that were assessed as relevant first; irrelevant last.
         order = {

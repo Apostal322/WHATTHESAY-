@@ -83,6 +83,40 @@ export const UNSUPPORTED_MESSAGE: Record<UnsupportedReason, string> = {
   content_script_unavailable: "Reload the YouTube tab so YouVerify can read the video.",
 };
 
+/**
+ * The main message shown for an error, in plain language. The backend's own message is kept
+ * for "Technical details": it is precise but written for whoever runs the server.
+ */
+export function errorMessage(code: string, during: "extraction" | "verification", fallback: string): string {
+  const saved = during === "verification" ? " Your claim is saved." : "";
+  switch (code) {
+    case "retrieval_unavailable":
+      return `Evidence search is temporarily unavailable.${saved} Please try again later.`;
+    case "provider_quota_exhausted":
+      return `Today's checking capacity has been used up.${saved} Please try again later.`;
+    case "provider_rate_limited":
+    case "rate_limited":
+      return `Too many checks in a short time.${saved} Wait a minute and try again.`;
+    case "provider_error":
+    case "provider_timeout":
+    case "client_timeout":
+      return `The AI service is busy or did not respond in time.${saved} Please try again.`;
+    case "invalid_model_output":
+    case "bad_response":
+      return `The AI service returned an answer YouVerify could not use.${saved} Please try again.`;
+    case "video_unavailable":
+      return "This video can't be analysed: it may be private, age-restricted, region-locked or too long.";
+    case "backend_unreachable":
+      return "YouVerify can't reach its server.";
+    case "missing_credentials":
+    case "model_not_found":
+    case "backend_misconfigured":
+      return "YouVerify isn't set up correctly yet.";
+    default:
+      return fallback;
+  }
+}
+
 /** User-facing guidance for backend error codes. */
 export function errorHint(code: string): string | null {
   switch (code) {

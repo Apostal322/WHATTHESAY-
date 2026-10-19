@@ -1,4 +1,4 @@
-import { errorHint } from "../shared/format";
+import { errorHint, errorMessage } from "../shared/format";
 import type { UiError } from "../shared/state";
 
 interface Props {
@@ -16,7 +16,7 @@ export function ErrorPanel({ error, onRetry, onManual, onReset }: Props) {
       <h2 id="error-title" className="card-title">
         {error.during === "extraction" ? "Couldn’t extract the claim" : "Couldn’t verify the claim"}
       </h2>
-      <p>{error.message}</p>
+      <p>{errorMessage(error.code, error.during, error.message)}</p>
       {hint && <p className="meta">{hint}</p>}
       <div className="actions">
         {showRetry && (
@@ -31,7 +31,11 @@ export function ErrorPanel({ error, onRetry, onManual, onReset }: Props) {
           Start over
         </button>
       </div>
-      <p className="meta code">Error code: {error.code}</p>
+      <details className="meta">
+        <summary>Technical details</summary>
+        <p>{error.message}</p>
+        <p className="code">Error code: {error.code}</p>
+      </details>
     </section>
   );
 }

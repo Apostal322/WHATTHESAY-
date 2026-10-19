@@ -486,9 +486,11 @@ def test_h15_taxonomy_and_compound_claim_rules_reach_the_model() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Known limitation (docs/quality/defects.md, L-1): the attribution safeguard checks "
-    "for the speaker's own words, not that they say what the claim says. A transcript line by "
-    "the right speaker on another topic still passes if the model wrongly calls it supporting.",
+    reason="Known limitation L-1 (severity S1; docs/quality/defects.md; GitHub issue #6): the "
+    "attribution safeguard checks for the speaker's own words, not that they say what the claim "
+    "says. A transcript line by the right speaker on another topic still passes when the model "
+    "wrongly calls it supporting. Needs semantic entailment (NLI or a bounded model call); "
+    "word overlap would reject paraphrases and every cross-language case.",
 )
 async def test_l1_speakers_own_words_on_another_topic_should_not_confirm(
     settings: Settings,

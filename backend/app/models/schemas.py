@@ -157,6 +157,7 @@ class VerdictAdjustment(BaseModel):
         "verdict_without_backing_source",
         "attribution_without_direct_evidence",
         "exact_quote_not_confirmed",
+        "verdict_contradicts_own_findings",
     ]
     from_verdict: Verdict
     to_verdict: Verdict

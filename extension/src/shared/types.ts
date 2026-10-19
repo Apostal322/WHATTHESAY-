@@ -76,7 +76,11 @@ export interface KeyFinding {
 
 /** A deterministic safeguard that changed the model's verdict (unlike a guardrail note, a warning). */
 export interface VerdictAdjustment {
-  rule: "verdict_without_backing_source" | "attribution_without_direct_evidence" | "exact_quote_not_confirmed";
+  rule:
+    | "verdict_without_backing_source"
+    | "attribution_without_direct_evidence"
+    | "exact_quote_not_confirmed"
+    | "verdict_contradicts_own_findings";
   from_verdict: Verdict;
   to_verdict: Verdict;
   reason: string;

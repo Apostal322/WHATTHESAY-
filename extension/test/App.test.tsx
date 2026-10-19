@@ -132,7 +132,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /check this claim/i }));
 
     const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText(/did not respond in time/i)).toBeInTheDocument();
+    expect(within(alert).getByText("The AI service is busy or did not respond in time. Your claim is saved. Please try again.")).toBeInTheDocument();
     await user.click(within(alert).getByRole("button", { name: /try again/i }));
     await screen.findByRole("heading", { name: "Contradicted" });
     expect(verifyClaim).toHaveBeenCalledTimes(2);
