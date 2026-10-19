@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
+
 from app.core.cache import TTLCache
 from app.core.config import Settings
 from app.models.schemas import ExtractRequest, ExtractResponse, VerifyRequest, VerifyResponse
@@ -98,3 +101,29 @@ async def test_h21_extraction_cache_distinguishes_window_settings(settings: Sett
     wider = settings.model_copy(update={"window_before_sec": 90})
     await ExtractionService(llm, wider, cache).extract(req)
     assert len(llm.calls) == 2  # a different clip is a different extraction
+
+
+# ------------------------------------------- H-22: the evaluator knows when the claim was made
+
+
+def test_h22_statement_date_must_be_a_real_calendar_date() -> None:
+    assert VerifyRequest(claim="The bridge opened.", statement_date="2024-02-29").statement_date
+    for bad in ("2024-02-30", "29.02.2024", "2024-02-29T10:00:00", "yesterday"):
+        with pytest.raises(ValidationError):
+            VerifyRequest(claim="The bridge opened.", statement_date=bad)
+
+
+async def test_h22_statement_date_reaches_the_evaluator(settings: Settings) -> None:
+    llm = _llm()
+    svc = VerificationService(llm, settings, retriever=Retriever([_src()]))
+    await svc.verify(VerifyRequest(claim="The bridge opened in 2019.", statement_date="2020-03-01"))
+    evaluation = [kw["prompt"] for name, kw in llm.calls if name == "EvaluationOutput"]
+    assert "published on 2020-03-01" in evaluation[0]
+
+
+async def test_h22_statement_date_is_part_of_the_cache_key(settings: Settings) -> None:
+    r = Retriever([_src()])
+    svc = VerificationService(_llm(), settings, cache=TTLCache(3600, 10), retriever=r)
+    for when in ("2019-01-01", "2023-01-01", "2023-01-01"):
+        await svc.verify(VerifyRequest(claim="The bridge opened in 2019.", statement_date=when))
+    assert r.calls == 2  # "will open" said in 2019 and in 2023 are different claims

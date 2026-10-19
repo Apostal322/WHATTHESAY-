@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -106,7 +107,19 @@ class VerifyRequest(_Strict):
     claim_type_hint: ClaimType | None = None
     video_id: str | None = Field(default=None, max_length=11)
     timestamp_sec: float | None = Field(default=None, ge=0, le=MAX_TIMESTAMP_SEC, strict=True)
+    statement_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="When the claim was published (the video's upload date), YYYY-MM-DD.",
+    )
     language: Language = "auto"
+
+    @field_validator("statement_date")
+    @classmethod
+    def _real_date(cls, v: str | None) -> str | None:
+        if v is not None:
+            date.fromisoformat(v)  # rejects 2024-02-30
+        return v
 
     @field_validator("claim", "context", mode="before")
     @classmethod

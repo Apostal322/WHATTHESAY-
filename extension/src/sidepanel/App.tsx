@@ -40,9 +40,9 @@ export function App({ api, videoSource }: Props) {
   const superseded = (controller: AbortController) => abortRef.current !== controller;
 
   const extract = useCallback(
-    async (videoId: string, timestampSec: number, durationSec: number | null) => {
+    async (videoId: string, timestampSec: number, durationSec: number | null, publishedDate: string | null) => {
       const controller = newController();
-      dispatch({ type: "EXTRACT_START", videoId, timestampSec });
+      dispatch({ type: "EXTRACT_START", videoId, timestampSec, publishedDate });
       try {
         const response = await api.extractClaim(
           { video_id: videoId, timestamp_sec: timestampSec, duration_sec: durationSec, language },
@@ -66,7 +66,7 @@ export function App({ api, videoSource }: Props) {
       // Re-read at click time so the timestamp is exactly where the user is now.
       const fresh = await refresh();
       if (fresh.status !== "ok") return;
-      await extract(fresh.videoId, fresh.timestampSec, fresh.durationSec);
+      await extract(fresh.videoId, fresh.timestampSec, fresh.durationSec, fresh.publishedDate);
     } finally {
       startingRef.current = false;
     }
@@ -83,6 +83,7 @@ export function App({ api, videoSource }: Props) {
           claim_type_hint: state.origin?.source === "video" ? state.origin.claimTypeHint : null,
           video_id: state.origin?.videoId ?? null,
           timestamp_sec: state.origin?.timestampSec ?? null,
+          statement_date: state.origin?.source === "video" ? state.origin.statementDate : null,
           language,
         },
         (stage) => !superseded(controller) && dispatch({ type: "VERIFY_STAGE", stage }),
@@ -105,7 +106,12 @@ export function App({ api, videoSource }: Props) {
 
   const retry = () => {
     if (state.error?.during === "extraction" && state.origin?.videoId != null && state.origin.timestampSec != null) {
-      void extract(state.origin.videoId, state.origin.timestampSec, ctx?.status === "ok" ? ctx.durationSec : null);
+      void extract(
+        state.origin.videoId,
+        state.origin.timestampSec,
+        ctx?.status === "ok" ? ctx.durationSec : null,
+        state.origin.statementDate,
+      );
     } else {
       void verify();
     }

@@ -48,6 +48,7 @@ export interface VerifyRequest {
   claim_type_hint?: ClaimType | null;
   video_id?: string | null;
   timestamp_sec?: number | null;
+  statement_date?: string | null;
   language: Language;
 }
 
@@ -132,6 +133,8 @@ export type VideoContext =
       timestampSec: number;
       durationSec: number | null;
       title: string | null;
+      /** Upload date (YYYY-MM-DD), only when the page metadata is for this video. */
+      publishedDate: string | null;
     }
   | {
       status: "unsupported";

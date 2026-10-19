@@ -45,7 +45,7 @@ NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
 # "Nothing found" may be a passing gap (an index lag, a short outage upstream): re-check soon.
 NO_EVIDENCE_CACHE_TTL_SEC = 300
 # Bump when prompts or verdict safeguards change what a cached response would say.
-VERIFICATION_POLICY_VERSION = "2026-10-19"
+VERIFICATION_POLICY_VERSION = "2026-10-19.2"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.,;:!?])")
 # Text between straight or curly double quotes; single quotes are too often apostrophes.
@@ -199,6 +199,7 @@ def verification_cache_key(req: VerifyRequest, model: str, retriever: str) -> st
     parts = [
         " ".join(req.claim.lower().split()),
         " ".join((req.context or "").split()),
+        req.statement_date or "",
         req.language,
         model,
         retriever,
@@ -409,6 +410,7 @@ class VerificationService:
                     scope_notes=analysis.scope_notes,
                     sources_block=format_sources_for_prompt(sources, _same_origin(sources)),
                     context=req.context,
+                    statement_date=req.statement_date,
                     language=req.language,
                 ),
                 schema=EvaluationOutput,

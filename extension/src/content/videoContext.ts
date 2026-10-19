@@ -30,7 +30,19 @@ export function readVideoContext(loc: Pick<Location, "hostname" | "pathname" | "
     timestampSec: Math.max(0, video.currentTime),
     durationSec: duration,
     title: readTitle(doc),
+    publishedDate: readPublishedDate(doc, videoId),
   };
+}
+
+/**
+ * The upload date from the watch page's microdata. YouTube does not always replace that markup
+ * on in-app navigation, so it is used only when its identifier names this video.
+ */
+function readPublishedDate(doc: Document, videoId: string): string | null {
+  const meta = (prop: string) => doc.querySelector<HTMLMetaElement>(`meta[itemprop="${prop}"]`)?.content ?? "";
+  if (meta("identifier") !== videoId) return null;
+  const date = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(meta("datePublished") || meta("uploadDate"));
+  return date?.[1] ?? null;
 }
 
 function readTitle(doc: Document): string | null {

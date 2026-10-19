@@ -36,6 +36,7 @@ describe("App", () => {
         timestamp_sec: 755,
         claim_type_hint: "factual",
         context: "Discussing the tech job market.",
+        statement_date: "2024-05-01", // the video's upload date, from the page
       }),
       expect.any(Function),
       expect.any(AbortSignal),
@@ -117,7 +118,12 @@ describe("App", () => {
     expect(submit).toBeDisabled();
     await user.type(textarea, "The Great Wall is visible from the Moon.{Control>}{Enter}{/Control}");
     await screen.findByRole("heading", { name: "Contradicted" });
-    expect(verifyClaim.mock.calls[0]?.[0]).toMatchObject({ claim: "The Great Wall is visible from the Moon.", video_id: null, context: null });
+    expect(verifyClaim.mock.calls[0]?.[0]).toMatchObject({
+      claim: "The Great Wall is visible from the Moon.",
+      video_id: null,
+      context: null,
+      statement_date: null,
+    });
   });
 
   it("shows a retryable verification error and retries with the same claim", async () => {

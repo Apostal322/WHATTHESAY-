@@ -15,6 +15,8 @@ export interface ClaimOrigin {
   timestampSec: number | null;
   context: string | null;
   claimTypeHint: ClaimType | null;
+  /** When the video was published; sent only for claims taken from the video. */
+  statementDate: string | null;
 }
 
 export interface UiError extends ErrorBody {
@@ -45,7 +47,7 @@ export const initialState: State = {
 };
 
 export type Action =
-  | { type: "EXTRACT_START"; videoId: string; timestampSec: number }
+  | { type: "EXTRACT_START"; videoId: string; timestampSec: number; publishedDate?: string | null }
   | { type: "EXTRACT_DONE"; response: ExtractResponse }
   | { type: "MANUAL_ENTRY"; videoId: string | null; timestampSec: number | null; notice?: string }
   | { type: "EDIT_CLAIM"; text: string }
@@ -76,6 +78,7 @@ export function reducer(state: State, action: Action): State {
           timestampSec: action.timestampSec,
           context: null,
           claimTypeHint: null,
+          statementDate: action.publishedDate ?? null,
         },
       };
 
@@ -95,6 +98,7 @@ export function reducer(state: State, action: Action): State {
           timestampSec: r.timestamp_sec,
           context: r.context,
           claimTypeHint: r.claim_type,
+          statementDate: state.origin?.statementDate ?? null,
         },
       };
     }
@@ -110,6 +114,7 @@ export function reducer(state: State, action: Action): State {
           timestampSec: action.timestampSec,
           context: null,
           claimTypeHint: null,
+          statementDate: null,
         },
       };
 

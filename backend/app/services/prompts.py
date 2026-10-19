@@ -156,6 +156,7 @@ def evaluation_prompt(
     sources_block: str,
     language: str,
     context: str | None = None,
+    statement_date: str | None = None,
     today: date | None = None,
 ) -> str:
     scope = f"\nScope considerations: {escape_untrusted(scope_notes)}" if scope_notes else ""
@@ -167,10 +168,18 @@ def evaluation_prompt(
         if context
         else ""
     )
+    # Validated as YYYY-MM-DD by the request model, so it is not untrusted text.
+    when = (
+        f"\nThe statement was published on {statement_date} (the video's upload date; it may have "
+        "been said earlier, never later). Judge it as of that date: later events cannot make it "
+        "false, but later reporting about earlier facts still counts."
+        if statement_date
+        else ""
+    )
     as_of = (today or date.today()).isoformat()
     return f"""Today's date: {as_of}.
 Claim to evaluate:
-<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}
+<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}{when}
 
 Sources:
 {sources_block}

@@ -14,6 +14,7 @@ function mountPlayer({ currentTime = 755.4, duration = 1800, ad = false } = {}) 
 
 describe("readVideoContext", () => {
   beforeEach(() => {
+    document.head.innerHTML = "";
     document.body.innerHTML = "";
   });
 
@@ -25,7 +26,30 @@ describe("readVideoContext", () => {
       timestampSec: 755.4,
       durationSec: 1800,
       title: "The Future of Coding",
+      publishedDate: null,
     });
+  });
+
+  const microdata = (id: string, published: string) => {
+    document.head.innerHTML = `<meta itemprop="identifier" content="${id}"><meta itemprop="datePublished" content="${published}">`;
+  };
+
+  it.each([
+    ["2024-09-10", "2024-09-10"],
+    ["2024-09-10T18:00:00-07:00", "2024-09-10"],
+    ["10 Sept 2024", null],
+  ])("reads the upload date %s from this video's microdata", (published, expected) => {
+    mountPlayer();
+    microdata("dQw4w9WgXcQ", published);
+    const ctx = readVideoContext(loc("/watch", "?v=dQw4w9WgXcQ"), document);
+    expect(ctx.status === "ok" && ctx.publishedDate).toBe(expected ?? null);
+  });
+
+  it("ignores microdata left over from the previous video after in-app navigation", () => {
+    mountPlayer();
+    microdata("aaaaaaaaaaa", "2019-01-01");
+    const ctx = readVideoContext(loc("/watch", "?v=dQw4w9WgXcQ"), document);
+    expect(ctx.status === "ok" && ctx.publishedDate).toBeNull();
   });
 
   it.each([

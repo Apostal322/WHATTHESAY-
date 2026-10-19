@@ -99,4 +99,4 @@ export function fakeApi(overrides: Partial<ApiClient> = {}): ApiClient {
   };
 }
 
-export const OK_CONTEXT: VideoContext = { status: "ok", videoId: VIDEO_ID, timestampSec: 755.3, durationSec: 1800, title: "The Future of Coding" };
+export const OK_CONTEXT: VideoContext = { status: "ok", videoId: VIDEO_ID, timestampSec: 755.3, durationSec: 1800, title: "The Future of Coding", publishedDate: "2024-05-01" };
