@@ -42,6 +42,8 @@ Stage = Literal["analyzing", "searching", "evaluating"]
 ProgressCallback = Callable[[Stage], Awaitable[None]]
 
 NON_CHECKABLE: set[ClaimType] = {"opinion", "prediction", "non_verifiable"}
+# "Nothing found" may be a passing gap (an index lag, a short outage upstream): re-check soon.
+NO_EVIDENCE_CACHE_TTL_SEC = 300
 # Bump when prompts or verdict safeguards change what a cached response would say.
 VERIFICATION_POLICY_VERSION = "2026-10-19"
 _CITATION_RE = re.compile(r"\[(S\d{1,2})\]")
@@ -311,7 +313,12 @@ class VerificationService:
                 },
             )
             if self._cache is not None:
-                self._cache.set(cache_key, resp)
+                if retrieval is not None and retrieval.degraded:
+                    pass  # evidence was incomplete because something failed: never reuse it
+                elif retrieval is not None and not resp.sources:
+                    self._cache.set(cache_key, resp, ttl_sec=NO_EVIDENCE_CACHE_TTL_SEC)
+                else:
+                    self._cache.set(cache_key, resp)
             return resp
 
         if analysis.claim_type in NON_CHECKABLE or not analysis.is_checkworthy:

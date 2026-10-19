@@ -19,6 +19,8 @@ log = logging.getLogger(__name__)
 
 # Clicks within the same few seconds should hit the cache.
 _CACHE_BUCKET_SEC = 3
+# Bump when the extraction prompt changes what a cached extraction would say.
+EXTRACTION_PROMPT_VERSION = "2026-10-19"
 
 
 def compute_window(
@@ -54,7 +56,11 @@ class ExtractionService:
         )
 
         bucket = int(req.timestamp_sec) // _CACHE_BUCKET_SEC
-        cache_key = f"{video_id}:{bucket}:{req.language}:{s.extraction_model}"
+        # Everything that decides what the model sees: the video, the moment, how the clip is cut.
+        cache_key = (
+            f"{video_id}:{bucket}:{req.language}:{s.extraction_model}:{s.window_before_sec}-"
+            f"{s.window_after_sec}:{s.video_fps}:{s.video_media_resolution}:{EXTRACTION_PROMPT_VERSION}"
+        )
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             log.info("extract_cache_hit", extra={"video_id": video_id})
             return hit.model_copy(update={"cached": True, "latency_ms": 0})

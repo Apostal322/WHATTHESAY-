@@ -59,6 +59,8 @@ class RetrievalResult:
     # copied into the response's guardrail notes so the user always sees them.
     notices: list[str] = field(default_factory=list)
     diagnostics: dict[str, Any] = field(default_factory=dict)
+    # Part of the retrieval failed (a search or a page fetch); the evidence may be incomplete.
+    degraded: bool = False
 
 
 class Retriever(Protocol):
@@ -287,6 +289,7 @@ class SearchRetriever:
             search_cost_usd=round(cost, 6) if cost is not None else None,
             empty_reason=empty,
             notices=notices,
+            degraded=bool(failed_queries or unread),
             diagnostics={
                 "searches": attempts,
                 "ranked": [
