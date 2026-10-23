@@ -19,6 +19,8 @@ export function extraction(overrides: Partial<ExtractResponse> = {}): ExtractRes
     is_exact_quote: false,
     requires_user_confirmation: true,
     language: "en",
+    statement_date: null,
+    statement_date_evidence: null,
     reason: null,
     model: "fake",
     latency_ms: 1000,
@@ -76,11 +78,17 @@ export function verification(overrides: Partial<VerifyResponse> = {}): VerifyRes
 
 export function staticVideoSource(ctx: VideoContext): VideoContextSource & { set(next: VideoContext): void } {
   let current = ctx;
+  const listeners = new Set<() => void>();
   return {
     get: () => Promise.resolve(current),
-    subscribe: () => () => undefined,
+    subscribe: (onChange) => {
+      listeners.add(onChange);
+      return () => listeners.delete(onChange);
+    },
+    /** Like a navigation: the new context is announced to subscribers. */
     set(next) {
       current = next;
+      listeners.forEach((fn) => fn());
     },
   };
 }
@@ -99,4 +107,4 @@ export function fakeApi(overrides: Partial<ApiClient> = {}): ApiClient {
   };
 }
 
-export const OK_CONTEXT: VideoContext = { status: "ok", videoId: VIDEO_ID, timestampSec: 755.3, durationSec: 1800, title: "The Future of Coding" };
+export const OK_CONTEXT: VideoContext = { status: "ok", videoId: VIDEO_ID, timestampSec: 755.3, durationSec: 1800, title: "The Future of Coding", publishedDate: "2024-05-01" };

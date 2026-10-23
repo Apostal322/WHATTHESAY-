@@ -7,6 +7,8 @@ by deterministic code before anything reaches the user.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.models.schemas import ClaimType, Stance, Verdict
@@ -28,6 +30,14 @@ class ExtractionOutput(BaseModel):
     )
     context: str | None = Field(default=None, description="1-2 sentences of surrounding context.")
     language: str | None = Field(default=None, description="ISO 639-1 code of the speech.")
+    statement_date: str | None = Field(
+        default=None,
+        description="When the statement was said or recorded, ONLY if the clip itself shows or "
+        "states it: YYYY, YYYY-MM or YYYY-MM-DD. Null otherwise.",
+    )
+    statement_date_evidence: str | None = Field(
+        default=None, description="What in the clip shows that date."
+    )
     reason_if_not_found: str | None = None
 
 
@@ -71,3 +81,26 @@ class EvaluationOutput(BaseModel):
     explanation: str = Field(description="2-4 sentences; cite sources inline as [S1].")
     key_findings: list[FindingOutput]
     limitations: list[str]
+
+
+class PassageSpeaker(BaseModel):
+    passage_id: str
+    speaker_is_named: bool = Field(
+        description="True only if the passage shows these are the words of the person the claim "
+        "names (names may be transliterated or translated)."
+    )
+
+
+class PartRelation(BaseModel):
+    passage_id: str
+    relation: Literal["entails", "contradicts", "neutral"]
+
+
+class ClaimPart(BaseModel):
+    text: str = Field(description="One assertion about what the person said.")
+    relations: list[PartRelation] = Field(description="One per passage.")
+
+
+class EntailmentOutput(BaseModel):
+    speakers: list[PassageSpeaker] = Field(description="One per passage.")
+    parts: list[ClaimPart] = Field(description="Every assertion about what was said.")

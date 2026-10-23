@@ -9,12 +9,16 @@ network does better is **not assumed**: step 3 measures it.
 Requirements: Windows 10/11, Python 3.11+ (`py --version`), Node.js 22.12+ (`node --version`),
 Git, Google Chrome.
 
-## 1. Clone the development branch
+## 1. Clone the branch under test
+
+Until pull request #14 is merged, the experiment code (speaker's-words check, call recording and
+budget ledger) is only on `feat/functional-beta`; after the merge, use `main`.
 
 ```powershell
-git clone --branch claude/kind-hawking-oybsqt https://github.com/Apostal322/WHATTHESAY-.git youverify
+git clone --branch feat/functional-beta https://github.com/Apostal322/WHATTHESAY-.git youverify
 cd youverify
 git log --oneline -3        # the newest commit is the one you expect
+# already cloned? then:  git fetch origin; git checkout feat/functional-beta; git pull
 ```
 
 ## 2. Python environment and tests (no key, no network calls)

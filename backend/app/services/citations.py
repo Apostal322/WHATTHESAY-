@@ -51,6 +51,7 @@ class EvidenceSource:
     domain: str | None
     excerpts: list[str] = field(default_factory=list)
     origin: ExcerptOrigin = "grounding_summary"
+    published_date: str | None = None  # YYYY-MM-DD, from page metadata or the search provider
 
 
 def is_safe_display_url(url: str) -> bool:
@@ -190,7 +191,8 @@ def format_sources_for_prompt(
         domain = untrusted_line(src.domain or "unknown domain")
         header = (
             f"[{src.id}] title: <untrusted>{title}</untrusted>; domain: {domain}; "
-            f"excerpts: {_ORIGIN_LABEL[src.origin]}"
+            f"excerpts: {_ORIGIN_LABEL[src.origin]}; "
+            + (f"published: {src.published_date}" if src.published_date else "date unknown")
         )
         if same_origin and same_origin.get(src.id):
             header += f"; same site or same original report as {', '.join(same_origin[src.id])}"

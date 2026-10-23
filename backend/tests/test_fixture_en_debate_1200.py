@@ -43,6 +43,7 @@ from app.services.citations import EvidenceSource
 from app.services.evidence import MAX_PASSAGE_CHARS
 from app.services.llm import LLMResult, Usage, VideoClip
 from app.services.verification import VerificationService, check_quotations
+from tests.conftest import judge_passages
 
 REPO = Path(__file__).resolve().parents[2]
 FIXTURE_PATH = REPO / "eval" / "fixtures" / "en-debate-1200" / "fixture.json"
@@ -179,7 +180,8 @@ def test_long_paragraphs_are_cut_to_policy_length() -> None:
 T_TRANSCRIPT = (
     # Speaker labelled by name, as in the Factbase transcripts: an anonymous label would not
     # show whose words these are (see the attribution speaker check).
-    "SYNTHETIC transcript: DONALD TRUMP: I will be voting no, because it goes too far. SYNTHETIC."
+    "SYNTHETIC transcript: DONALD TRUMP: On Amendment 4, I will be voting no, because it goes too "
+    "far. SYNTHETIC."
 )
 T_NEWS = (
     "SYNTHETIC headline style: candidate effectively votes to uphold the six-week ban, outlet says."
@@ -303,6 +305,7 @@ async def test_fixture_evidence_is_labelled_in_every_response(settings: Settings
             "EvaluationOutput": [
                 _evaluation("supported", {"S1": "supports"}, "He said he would vote no [S1].")
             ],
+            "EntailmentOutput": [judge_passages("entails")],  # "I will be voting no"
         }
     )
     svc = VerificationService(llm, settings, retriever=FixtureRetriever(_synthetic_fixture()))
@@ -310,7 +313,11 @@ async def test_fixture_evidence_is_labelled_in_every_response(settings: Settings
     assert resp.search_queries == []  # nothing was searched
     assert any("offline regression fixture" in n for n in resp.guardrail_notes)
     assert all(s.excerpt_origin == "page_text" for s in resp.sources)
-    assert [c for c, _ in llm.calls] == ["ClaimAnalysisOutput", "EvaluationOutput"]
+    assert [c for c, _ in llm.calls] == [
+        "ClaimAnalysisOutput",
+        "EvaluationOutput",
+        "EntailmentOutput",  # his own words, checked for what they say
+    ]
 
 
 # ----------------------------------------------- direct quotation vs. author's interpretation
@@ -354,7 +361,11 @@ def test_short_quotes_and_apostrophes_are_ignored() -> None:
 async def test_pipeline_flags_quoted_characterization_but_keeps_the_verdict_logic(
     settings: Settings,
 ) -> None:
-    """The quote check is advisory; verdict guardrails decide the verdict independently."""
+    """The quote check is advisory; verdict guardrails decide the verdict independently.
+
+    Here they decide it: "I will be voting no" is Trump's own words (identity and authenticity
+    pass) but does not say he would vote to support the ban, so it backs no verdict (L-1).
+    """
     claim = "Trump said he would vote to support the six-week ban."
     llm = ScriptedLLM(
         {
@@ -373,6 +384,7 @@ async def test_pipeline_flags_quoted_characterization_but_keeps_the_verdict_logi
                     ],
                 )
             ],
+            "EntailmentOutput": [judge_passages("neutral")],
         }
     )
     fx = _synthetic_fixture()
@@ -381,6 +393,8 @@ async def test_pipeline_flags_quoted_characterization_but_keeps_the_verdict_logi
     flagged = [n for n in resp.guardrail_notes if "vote to support the six-week ban" in n]
     assert len(flagged) == 1  # explanation + finding: the same quote is reported once
     assert not any("I will be voting no" in n for n in resp.guardrail_notes)
+    assert resp.verdict == "insufficient_evidence"
+    assert [a.rule for a in resp.verdict_adjustments] == ["attribution_not_entailed"]
 
 
 # --------------------------------------------------------------------- chronology
@@ -451,6 +465,9 @@ async def test_each_proposition_is_verified_and_scored_on_its_own(settings: Sett
             # P5 legal effect: a confident 'contradicted' with no contradicting source.
             _evaluation("contradicted", {**S, "S4": "supports"}, "The record says otherwise."),
         ],
+        # Only P2 reaches the entailment stage (P1, P4 fail on exact words; P3 is not a
+        # confident verdict; P5 loses its verdict to the backing-source rule first).
+        "EntailmentOutput": [judge_passages("entails")],  # "On Amendment 4, I will be voting no"
     }
     svc = VerificationService(
         ScriptedLLM(script), settings, retriever=FixtureRetriever(_synthetic_fixture())

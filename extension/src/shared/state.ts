@@ -9,12 +9,31 @@ export type Phase =
   | "complete"
   | "error";
 
+/**
+ * What a check is bound to. A claim taken from a video stays bound to that video (id, title,
+ * moment) for its whole life, whatever the user watches next.
+ */
 export interface ClaimOrigin {
   source: "video" | "manual";
   videoId: string | null;
   timestampSec: number | null;
   context: string | null;
   claimTypeHint: ClaimType | null;
+  videoTitle: string | null;
+  durationSec: number | null;
+  /** The video's upload date: only an upper bound on when the claim was said. */
+  videoPublishedDate: string | null;
+  /** When it was said, only if the clip itself shows it (from the extraction). */
+  statementDate: string | null;
+}
+
+/** The video a check starts from, as read from the page. */
+export interface VideoRef {
+  videoId: string;
+  timestampSec: number;
+  durationSec?: number | null;
+  title?: string | null;
+  publishedDate?: string | null;
 }
 
 export interface UiError extends ErrorBody {
@@ -45,7 +64,7 @@ export const initialState: State = {
 };
 
 export type Action =
-  | { type: "EXTRACT_START"; videoId: string; timestampSec: number }
+  | ({ type: "EXTRACT_START" } & VideoRef)
   | { type: "EXTRACT_DONE"; response: ExtractResponse }
   | { type: "MANUAL_ENTRY"; videoId: string | null; timestampSec: number | null; notice?: string }
   | { type: "EDIT_CLAIM"; text: string }
@@ -54,7 +73,9 @@ export type Action =
   | { type: "VERIFY_DONE"; result: VerifyResponse }
   | { type: "FAIL"; error: UiError }
   | { type: "EDIT_AGAIN" }
-  | { type: "RESET" };
+  | { type: "RESET" }
+  /** Bring back an earlier check exactly as it was (it keeps its own video binding). */
+  | { type: "RESTORE"; snapshot: State };
 
 export const MIN_CLAIM_LENGTH = 5;
 export const MAX_CLAIM_LENGTH = 1000;
@@ -76,12 +97,29 @@ export function reducer(state: State, action: Action): State {
           timestampSec: action.timestampSec,
           context: null,
           claimTypeHint: null,
+          videoTitle: action.title ?? null,
+          durationSec: action.durationSec ?? null,
+          videoPublishedDate: action.publishedDate ?? null,
+          statementDate: null,
         },
       };
 
     case "EXTRACT_DONE": {
       if (state.phase !== "extracting") return state; // stale response after cancel
       const r = action.response;
+      if (state.origin?.videoId != null && r.video_id !== state.origin.videoId) {
+        // Never show a result for one video as if it were about another.
+        return {
+          ...state,
+          phase: "error",
+          error: {
+            code: "internal_error",
+            message: "The result did not match the requested video. Try again.",
+            retryable: true,
+            during: "extraction",
+          },
+        };
+      }
       const found = r.status === "success" && r.claim;
       return {
         ...state,
@@ -95,6 +133,10 @@ export function reducer(state: State, action: Action): State {
           timestampSec: r.timestamp_sec,
           context: r.context,
           claimTypeHint: r.claim_type,
+          videoTitle: state.origin?.videoTitle ?? null,
+          durationSec: state.origin?.durationSec ?? null,
+          videoPublishedDate: state.origin?.videoPublishedDate ?? null,
+          statementDate: found ? (r.statement_date ?? null) : null,
         },
       };
     }
@@ -110,6 +152,10 @@ export function reducer(state: State, action: Action): State {
           timestampSec: action.timestampSec,
           context: null,
           claimTypeHint: null,
+          videoTitle: null,
+          durationSec: null,
+          videoPublishedDate: null,
+          statementDate: null,
         },
       };
 
@@ -141,5 +187,8 @@ export function reducer(state: State, action: Action): State {
 
     case "RESET":
       return initialState;
+
+    case "RESTORE":
+      return action.snapshot;
   }
 }

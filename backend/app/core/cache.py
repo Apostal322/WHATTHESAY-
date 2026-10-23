@@ -41,10 +41,12 @@ class TTLCache(Generic[V]):
         self._data.move_to_end(key)
         return value
 
-    def set(self, key: str, value: V) -> None:
-        if self._ttl <= 0:
+    def set(self, key: str, value: V, ttl_sec: float | None = None) -> None:
+        """Store `value`; `ttl_sec` shortens (never extends) the cache's TTL for this entry."""
+        ttl = self._ttl if ttl_sec is None else min(ttl_sec, self._ttl)
+        if ttl <= 0:
             return
-        self._data[key] = (self._clock() + self._ttl, value)
+        self._data[key] = (self._clock() + ttl, value)
         self._data.move_to_end(key)
         while len(self._data) > self._max:
             self._data.popitem(last=False)

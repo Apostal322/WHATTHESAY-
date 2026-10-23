@@ -35,6 +35,9 @@ export interface ExtractResponse {
   is_exact_quote: boolean;
   requires_user_confirmation: true;
   language: string | null;
+  /** When it was said, only if the clip itself shows or states it (YYYY[-MM[-DD]]). */
+  statement_date: string | null;
+  statement_date_evidence: string | null;
   reason: string | null;
   model: string;
   latency_ms: number;
@@ -48,6 +51,10 @@ export interface VerifyRequest {
   claim_type_hint?: ClaimType | null;
   video_id?: string | null;
   timestamp_sec?: number | null;
+  /** When it was said, only if actually known; never the upload date. */
+  statement_date?: string | null;
+  /** The video's upload date: the claim was said on or before it. */
+  video_published_date?: string | null;
   language: Language;
 }
 
@@ -75,8 +82,23 @@ export interface KeyFinding {
 }
 
 /** A deterministic safeguard that changed the model's verdict (unlike a guardrail note, a warning). */
+export type EntailmentRelation = "entails" | "contradicts" | "neutral";
+
+export interface AttributionCheck {
+  status: "confirmed" | "not_confirmed" | "failed";
+  checker: string;
+  passages: { id: string; source_id: string; text: string; speaker_is_named: boolean | null }[];
+  parts: { text: string; relations: Record<string, EntailmentRelation> }[];
+  failure: string | null;
+}
+
 export interface VerdictAdjustment {
-  rule: "verdict_without_backing_source" | "attribution_without_direct_evidence" | "exact_quote_not_confirmed";
+  rule:
+    | "verdict_without_backing_source"
+    | "attribution_without_direct_evidence"
+    | "exact_quote_not_confirmed"
+    | "verdict_contradicts_own_findings"
+    | "attribution_not_entailed";
   from_verdict: Verdict;
   to_verdict: Verdict;
   reason: string;
@@ -96,6 +118,8 @@ export interface VerifyResponse {
   guardrail_notes: string[];
   /** Absent from older backends. */
   verdict_adjustments?: VerdictAdjustment[];
+  /** Present only when the entailment check ran. Model judgments, for human review. */
+  attribution_check?: AttributionCheck | null;
   /** Model that served each step (analysis, retrieval, evaluation); absent from older backends. */
   models_used?: Record<string, string>;
   model: string;
@@ -128,6 +152,8 @@ export type VideoContext =
       timestampSec: number;
       durationSec: number | null;
       title: string | null;
+      /** Upload date (YYYY-MM-DD), only when the page metadata is for this video. */
+      publishedDate: string | null;
     }
   | {
       status: "unsupported";

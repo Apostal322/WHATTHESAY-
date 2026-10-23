@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.services.temporal import PARTIAL_DATE_RE, valid_partial_date
+
 ClaimType = Literal["factual", "prediction", "opinion", "ambiguous", "non_verifiable"]
 Verdict = Literal["supported", "contradicted", "mixed", "insufficient_evidence", "not_verifiable"]
 Stance = Literal["supports", "contradicts", "partially_supports", "unclear", "irrelevant"]
@@ -90,6 +92,14 @@ class ExtractResponse(BaseModel):
     )
     requires_user_confirmation: Literal[True] = True
     language: str | None
+    statement_date: str | None = Field(
+        default=None,
+        description="When it was said, if the clip itself shows or states it (YYYY[-MM[-DD]]). "
+        "Model-reported; never the upload date.",
+    )
+    statement_date_evidence: str | None = Field(
+        default=None, description="What in the clip shows the date (a caption, the speaker...)."
+    )
     reason: str | None = Field(default=None, description="Why no claim was found, if applicable.")
     model: str
     latency_ms: int
@@ -106,7 +116,25 @@ class VerifyRequest(_Strict):
     claim_type_hint: ClaimType | None = None
     video_id: str | None = Field(default=None, max_length=11)
     timestamp_sec: float | None = Field(default=None, ge=0, le=MAX_TIMESTAMP_SEC, strict=True)
+    statement_date: str | None = Field(
+        default=None,
+        pattern=PARTIAL_DATE_RE,
+        description="When the claim was said, only if actually known (shown or stated in the "
+        "video, or given by the user): YYYY, YYYY-MM or YYYY-MM-DD. Never the upload date.",
+    )
+    video_published_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="The video's publication (upload) date: the claim was said on or before it.",
+    )
     language: Language = "auto"
+
+    @field_validator("statement_date", "video_published_date")
+    @classmethod
+    def _real_date(cls, v: str | None) -> str | None:
+        if v is not None and not valid_partial_date(v):
+            raise ValueError("Not a real calendar date.")
+        return v
 
     @field_validator("claim", "context", mode="before")
     @classmethod
@@ -157,10 +185,40 @@ class VerdictAdjustment(BaseModel):
         "verdict_without_backing_source",
         "attribution_without_direct_evidence",
         "exact_quote_not_confirmed",
+        "verdict_contradicts_own_findings",
+        "attribution_not_entailed",
     ]
     from_verdict: Verdict
     to_verdict: Verdict
     reason: str
+
+
+class CheckedPassage(BaseModel):
+    id: str = Field(description="P1, P2...: as shown to the entailment check.")
+    source_id: str
+    text: str = Field(description="The excerpt text the check judged (verbatim from the source).")
+    speaker_is_named: bool | None = Field(
+        description="Model judgment: these are the named person's words. None if not judged."
+    )
+
+
+class CheckedPart(BaseModel):
+    text: str = Field(description="Model-written: one assertion the claim makes.")
+    relations: dict[str, Literal["entails", "contradicts", "neutral"]] = Field(
+        description="Model judgment per passage id."
+    )
+
+
+class AttributionCheck(BaseModel):
+    """What the entailment check saw and judged, for human review. Model judgments throughout."""
+
+    status: Literal["confirmed", "not_confirmed", "failed"]
+    checker: str
+    passages: list[CheckedPassage]
+    parts: list[CheckedPart] = Field(default_factory=list)
+    failure: str | None = Field(
+        default=None, description="Why the check could not be completed (status failed)."
+    )
 
 
 class VerifyResponse(BaseModel):
@@ -183,6 +241,11 @@ class VerifyResponse(BaseModel):
         default_factory=list,
         description="Safeguards that changed the verdict, in order. Empty when the model's "
         "verdict stood; guardrail_notes may still carry warnings.",
+    )
+    attribution_check: AttributionCheck | None = Field(
+        default=None,
+        description="Present only when the entailment check ran (a claim about what someone "
+        "said that reached a confident verdict after the deterministic checks).",
     )
     model: str
     models_used: dict[str, str] = Field(

@@ -9,9 +9,10 @@ from __future__ import annotations
 import re
 import statistics
 from collections.abc import Sequence
+from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.schemas import ClaimType, Verdict
 
@@ -23,8 +24,16 @@ class EvidenceRef(BaseModel):
     note: str | None = None
 
 
+ReviewStatus = Literal["unreviewed", "human_verified", "disputed"]
+
+
 class EvalItem(BaseModel):
-    """One row of eval/*.jsonl. All fields are human-labelled ground truth."""
+    """One row of eval/*.jsonl.
+
+    Labels count as ground truth only when `review_status` is `human_verified`, with the
+    reviewer and date recorded. Everything else (unreviewed, disputed, AI-written examples) is
+    reported separately as provisional and never as accuracy.
+    """
 
     id: str
     video_id: str | None = Field(
@@ -37,6 +46,15 @@ class EvalItem(BaseModel):
     reference_verdict: Verdict
     supporting_evidence: list[EvidenceRef] = Field(default_factory=list)
     notes: str | None = None
+    review_status: ReviewStatus = "unreviewed"
+    reviewed_by: str | None = None
+    reviewed_on: date | None = None
+
+    @model_validator(mode="after")
+    def _verified_needs_a_reviewer(self) -> EvalItem:
+        if self.review_status == "human_verified" and not (self.reviewed_by and self.reviewed_on):
+            raise ValueError("human_verified items need reviewed_by and reviewed_on")
+        return self
 
 
 class EvalRecord(BaseModel):
@@ -116,37 +134,75 @@ def _p(values: Sequence[int], q: float) -> int | None:
     return ordered[min(len(ordered) - 1, round(q * (len(ordered) - 1)))]
 
 
-def summarize(
-    items: Sequence[EvalItem], records: Sequence[EvalRecord], claim_match_threshold: float = 0.5
+def _label_metrics(
+    by_id: dict[str, EvalItem], records: Sequence[EvalRecord], threshold: float
 ) -> dict[str, object]:
-    by_id = {i.id: i for i in items}
+    """Metrics that compare against labels; only as meaningful as the labels' review status."""
     extraction = [r for r in records if r.claim_f1 is not None]
     verified = [r for r in records if r.predicted_verdict is not None]
-    sources_total = sum(len(r.source_urls) for r in records)
-
-    verdict_correct = [r.predicted_verdict == by_id[r.id].reference_verdict for r in verified]
-    false_confident = [
-        is_false_confident(r.predicted_verdict, by_id[r.id].reference_verdict)  # type: ignore[arg-type]
-        for r in verified
-    ]
     type_correct = [
         r.extracted_claim_type == by_id[r.id].claim_type
         for r in extraction
         if r.extracted_claim_type is not None
     ]
-    costs = [r.estimated_cost_usd for r in verified if r.estimated_cost_usd is not None]
-    recalls = [r.reference_domain_recall for r in verified if r.reference_domain_recall is not None]
+    return {
+        "extraction_n": len(extraction),
+        "mean_claim_f1": _mean([r.claim_f1 for r in extraction if r.claim_f1 is not None]),
+        f"claim_match_rate@f1>={threshold}": _mean(
+            [float((r.claim_f1 or 0) >= threshold) for r in extraction]
+        ),
+        "claim_type_accuracy": _mean([float(x) for x in type_correct]),
+        "verification_n": len(verified),
+        "verdict_accuracy": _mean(
+            [float(r.predicted_verdict == by_id[r.id].reference_verdict) for r in verified]
+        ),
+        "false_confident_rate": _mean(
+            [
+                float(is_false_confident(r.predicted_verdict, by_id[r.id].reference_verdict))  # type: ignore[arg-type]
+                for r in verified
+            ]
+        ),
+        "reference_domain_recall": _mean(
+            [r.reference_domain_recall for r in verified if r.reference_domain_recall is not None]
+        ),
+    }
 
+
+def summarize(
+    items: Sequence[EvalItem], records: Sequence[EvalRecord], claim_match_threshold: float = 0.5
+) -> dict[str, object]:
+    """Label-based metrics only over human-verified items; the rest is reported as provisional.
+
+    Latency, cost and citation checks do not depend on labels and use every record.
+    """
+    by_id = {i.id: i for i in items}
+    human = {i.id for i in items if i.review_status == "human_verified"}
+    summary = _summarize_all(items, records, claim_match_threshold)
+    summary["human_verified"] = {
+        "items": len(human),
+        **_label_metrics(by_id, [r for r in records if r.id in human], claim_match_threshold),
+    }
+    summary["provisional_unreviewed_labels"] = {
+        "items": len(items) - len(human),
+        "note": "Agreement with labels nobody has verified. Not accuracy.",
+        **_label_metrics(by_id, [r for r in records if r.id not in human], claim_match_threshold),
+    }
+    return summary
+
+
+def _summarize_all(
+    items: Sequence[EvalItem], records: Sequence[EvalRecord], claim_match_threshold: float = 0.5
+) -> dict[str, object]:
+    """Label-independent measurements over every record."""
+    extraction = [r for r in records if r.claim_f1 is not None]
+    verified = [r for r in records if r.predicted_verdict is not None]
+    sources_total = sum(len(r.source_urls) for r in records)
+    costs = [r.estimated_cost_usd for r in verified if r.estimated_cost_usd is not None]
     return {
         "items": len(items),
         "errors": sum(1 for r in records if r.error),
         "extraction": {
             "n": len(extraction),
-            "mean_claim_f1": _mean([r.claim_f1 for r in extraction if r.claim_f1 is not None]),
-            f"claim_match_rate@f1>={claim_match_threshold}": _mean(
-                [float((r.claim_f1 or 0) >= claim_match_threshold) for r in extraction]
-            ),
-            "claim_type_accuracy": _mean([float(x) for x in type_correct]),
             "latency_ms_p50": _p(
                 [r.extraction_latency_ms for r in extraction if r.extraction_latency_ms], 0.5
             ),
@@ -156,8 +212,6 @@ def summarize(
         },
         "verification": {
             "n": len(verified),
-            "verdict_accuracy": _mean([float(x) for x in verdict_correct]),
-            "false_confident_rate": _mean([float(x) for x in false_confident]),
             "citation_validity": round(
                 sum(r.valid_citation_count for r in records) / sources_total, 4
             )
@@ -168,7 +222,6 @@ def summarize(
             )
             if sources_total
             else None,
-            "reference_domain_recall": _mean(recalls),
             "latency_ms_p50": _p(
                 [r.verification_latency_ms for r in verified if r.verification_latency_ms], 0.5
             ),

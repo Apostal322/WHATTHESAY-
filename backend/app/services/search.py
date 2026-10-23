@@ -23,6 +23,7 @@ from typing import Protocol
 import httpx
 
 from app.core.logging import redact_secrets
+from app.services.temporal import iso_day
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class SearchHit:
     snippet: str | None
     rank: int  # 1-based position in this provider's result list
     engines: tuple[str, ...] = ()  # upstream engines (SearXNG) that returned it
+    published_date: str | None = None  # as reported by the provider, YYYY-MM-DD
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,7 @@ class SearxngProvider:
                     snippet=item.get("content") or None,
                     rank=len(hits) + 1,
                     engines=tuple(str(e) for e in engines),
+                    published_date=iso_day(item.get("publishedDate")),
                 )
             )
             if len(hits) >= max_results:
@@ -183,6 +186,7 @@ class BraveProvider:
                     title=item.get("title") or None,
                     snippet=item.get("description") or None,
                     rank=len(hits) + 1,
+                    published_date=iso_day(item.get("page_age")),
                 )
             )
         return SearchResponse(hits=hits[:max_results], provider=self.name)

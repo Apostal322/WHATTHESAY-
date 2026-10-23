@@ -481,34 +481,4 @@ def test_h15_taxonomy_and_compound_claim_rules_reach_the_model() -> None:
     assert "a fact with an unsupported cause" in EVALUATION_SYSTEM
 
 
-# --------------------------------------------- known limitation, recorded as a failing test
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Known limitation (docs/quality/defects.md, L-1): the attribution safeguard checks "
-    "for the speaker's own words, not that they say what the claim says. A transcript line by "
-    "the right speaker on another topic still passes if the model wrongly calls it supporting.",
-)
-async def test_l1_speakers_own_words_on_another_topic_should_not_confirm(
-    settings: Settings,
-) -> None:
-    class Transcript(StaticRetriever):
-        async def retrieve(self, **kw: object) -> RetrievalResult:
-            src = EvidenceSource(
-                "S1",
-                "https://transcripts.example.org/t",
-                "Transcript",
-                "transcripts.example.org",
-                ["MODERATOR: Taxes? DOE: I will vote to raise taxes next year."],
-                origin="page_text",
-            )
-            return RetrievalResult(sources=[src], executed_queries=["q"], backend="static")
-
-    llm = FakeLLM(
-        json_responses={"ClaimAnalysisOutput": ANALYSIS_FACTUAL, "EvaluationOutput": EVAL_SUPPORTED}
-    )
-    resp = await VerificationService(llm, settings, retriever=Transcript()).verify(
-        VerifyRequest(claim="Senator Jane Doe said she would vote to keep the ban.")
-    )
-    assert resp.verdict == "insufficient_evidence"
+# L-1 (the right speaker's words on another topic) is now tested in test_semantic_attribution.py.

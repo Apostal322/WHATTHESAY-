@@ -12,7 +12,7 @@ from app.models.schemas import VerifyRequest, VerifyResponse
 from app.services.citations import EvidenceSource
 from app.services.retrieval import RetrievalResult
 from app.services.verification import VerificationService
-from tests.conftest import FakeLLM
+from tests.conftest import FakeLLM, judge_passages
 
 SAID_KEEP = "Senator Jane Doe said she would vote to keep the ban."
 FACTUAL = "The ban was in force in September 2024."
@@ -59,9 +59,14 @@ async def _verify(
     stances: dict[str, str],
     explanation: str = "See the sources [S1].",
     analysis: dict[str, Any] | None = None,
+    entailment: dict[str, Any] | None = None,
 ) -> VerifyResponse:
+    # By default the speaker's words say what the verdict says: true of these fixtures, whose
+    # transcript lines and quotes are on point. Tests of the semantic stage pass their own.
+    relation = {"supported": "entails", "contradicted": "contradicts"}.get(verdict, "neutral")
     llm = FakeLLM(
         json_responses={
+            "EntailmentOutput": entailment or judge_passages(relation),
             "ClaimAnalysisOutput": analysis or _analysis(claim),
             "EvaluationOutput": {
                 "source_assessments": [

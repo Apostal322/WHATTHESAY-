@@ -71,7 +71,8 @@ Task: identify the single statement the viewer most likely wants to check: the m
 - claim_type: factual (checkable fact about the past/present), prediction (about the future), opinion (value judgement), ambiguous (too vague to check as stated), non_verifiable (not checkable in principle).
 - evidence_from_video: what the speaker said.
 - context: 1-2 sentences of what surrounds the statement.
-- language: ISO 639-1 code of the speech."""
+- language: ISO 639-1 code of the speech.
+- statement_date: when this was said or recorded, only if the clip itself shows or states it (an on-screen date or caption such as "Senate hearing, 12 May 1998", or the speaker naming the date of the occasion). Use YYYY, YYYY-MM or YYYY-MM-DD, as precise as the clip allows; put what shows it in statement_date_evidence. Do not guess from appearance, and do not use the upload date or your own knowledge: otherwise leave both null. Archival footage, compilations and rebroadcasts are often published years after the words were said."""
 
 
 # ------------------------------------------------------------------ analysis
@@ -81,14 +82,14 @@ ANALYSIS_SYSTEM = f"""You prepare claims for evidence-based fact-checking.
 Classify the claim and write focused web search queries. Do not judge whether it is true."""
 
 
-def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
+def analysis_prompt(*, claim: str, context: str | None, language: str, temporal: str = "") -> str:
     ctx = (
         f"\nContext from the video:\n<untrusted>{escape_untrusted(context)}</untrusted>"
         if context
         else ""
     )
     return f"""Claim:
-<untrusted>{escape_untrusted(claim)}</untrusted>{ctx}
+<untrusted>{escape_untrusted(claim)}</untrusted>{ctx}{temporal}
 
 - normalized_claim: restate the claim precisely and self-contained, keeping its original meaning, numbers and scope. Do not strengthen or weaken it. If the context names who said it and when, and the claim depends on that (politics, current events), keep the speaker and date in the claim.
 - claim_type: factual | prediction | opinion | ambiguous | non_verifiable.
@@ -97,7 +98,7 @@ def analysis_prompt(*, claim: str, context: str | None, language: str) -> str:
   - Questions, hypotheticals ("if X happened..."), jokes and satire assert nothing as fact: non_verifiable, unless a factual premise is stated as true (then check only that premise).
   - Compound claims ("A happened because of B"): keep every part, including causes, dates, numbers and who said it; a verdict must not cover parts the evidence does not.
 - is_checkworthy: true if at least one objectively checkable factual assertion is present.
-- search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language.
+- search_queries: 2-4 queries that would surface primary sources, official statistics, research, reputable reporting or existing fact-checks. Include a query in English and, if the claim is in another language, one in that language. If when it was said is known, aim the queries at that period; if it is unknown, do not assume it is recent.
 - scope_notes: time period, geography, definitions or measurement details the verdict depends on.
 - attributed_to: if the claim is about what a specific person or organization said or wrote (rather than about the facts themselves), who; otherwise an empty string.
 - exact_words: only words the claim presents as that speaker's exact wording (normally in quotation marks); an empty list if the claim paraphrases.
@@ -131,6 +132,7 @@ Summarise the relevant findings as short factual statements, each tied to what a
 EVALUATION_SYSTEM = f"""You evaluate retrieved evidence for a fact-check and produce a verdict.
 {_UNTRUSTED_NOTE}
 Rules:
+- Each source shows its publication date when known. A source published after the statement can describe the earlier period (it counts) or later events (they cannot make an earlier statement false). A source published before the statement cannot report on what was said in it.
 - Use ONLY the numbered sources provided. Do not use your own background knowledge to fill gaps.
 - Cite sources by their id, e.g. [S2]. Never cite an id that is not listed.
 - Consider: time period, geography, definitions of numbers, sample and methodology, and whether sources are independent (several copies of one original report are one piece of evidence).
@@ -156,6 +158,7 @@ def evaluation_prompt(
     sources_block: str,
     language: str,
     context: str | None = None,
+    temporal: str = "",
     today: date | None = None,
 ) -> str:
     scope = f"\nScope considerations: {escape_untrusted(scope_notes)}" if scope_notes else ""
@@ -170,7 +173,7 @@ def evaluation_prompt(
     as_of = (today or date.today()).isoformat()
     return f"""Today's date: {as_of}.
 Claim to evaluate:
-<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}
+<untrusted>{escape_untrusted(claim)}</untrusted>{scope}{ctx}{temporal}
 
 Sources:
 {sources_block}
@@ -179,3 +182,61 @@ Return:
 - source_assessments: one per source id: supports | contradicts | partially_supports | unclear | irrelevant, with a one-sentence note. Use unclear when the source is about the claim but its excerpts neither clearly support nor contradict it; do not force such a source into another stance. Keep sources that contradict your conclusion; do not drop them.
 - verdict, explanation (2-4 sentences with [S#] citations), key_findings (each tied to source ids), limitations.
 {output_language_instruction(language)}"""
+
+
+# ---------------------------------------------------------------- entailment
+
+ENTAILMENT_SYSTEM = f"""You check one thing for a fact-check of a claim about what someone said: \
+whether that person's own words, in the numbered passages, say what the claim says they said.
+{_UNTRUSTED_NOTE}
+Use only the passages. Do not use background knowledge, and do not assume the claim is true or \
+false.
+- speakers: for each passage, speaker_is_named is true only if the passage itself shows that \
+the words are spoken or written by the person the claim names. Names may be transliterated or \
+translated (Ivanov = Иванов). A moderator, interviewer, reporter or anyone else is not that \
+person, even when they mention them or repeat the claim.
+- parts: split the claim into every separate assertion about what the person said (each \
+statement, with its numbers, dates and conditions); a simple claim is one part. Do not drop a \
+part because it is hard to check.
+- For each part and each passage, judge the named person's words only:
+  - entails: their words state this part. A paraphrase or a translation (Russian <-> English) \
+counts if nothing changes: same meaning, polarity (negation), numbers, quantities, dates, time \
+frame, subject and object. What their words imply or would cause is not what they said.
+  - contradicts: their words state the opposite or something incompatible (a different number, \
+date or position on the same point).
+  - neutral: anything else. Words on another topic, or on the same topic without stating this \
+part; a question; a hypothetical or conditional ("if..."); sarcasm; quoting or describing \
+someone else's view; a statement about a different time than the part specifies. When unsure, \
+choose neutral.
+- Finding the words is not the same as the person saying them. If the claim quotes exact words \
+(in quotation marks), entails means the person said or wrote those words (in another language: \
+a faithful translation) as their own statement. The same words inside a denial ("I never said \
+..."), a question, a hypothetical, or a quotation or description of someone else's words or plan \
+are neutral: they appear, but the person did not say them in the claim's sense. For a paraphrase, \
+likewise, only the person's own assertion counts."""
+
+
+def entailment_prompt(
+    *, claim: str, speaker: str, passages: list[tuple[str, str]], translated_quote: bool
+) -> str:
+    who = (
+        f"\nPerson the claim names: <untrusted>{untrusted_line(speaker)}</untrusted>"
+        if speaker
+        else "\nThe person is the one the claim names."
+    )
+    note = (
+        "\nThe claim's quoted words are in another language than the passages: a faithful "
+        "translation can match, a loose one cannot."
+        if translated_quote
+        else ""
+    )
+    blocks = "\n\n".join(
+        f"[{pid}]\n<untrusted>{escape_untrusted(text)}</untrusted>" for pid, text in passages
+    )
+    return f"""Claim about what was said:
+<untrusted>{escape_untrusted(claim)}</untrusted>{who}{note}
+
+Passages:
+{blocks}
+
+Return speakers (one per passage id) and parts (each with a relation for every passage id)."""

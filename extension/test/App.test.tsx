@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/shared/api";
@@ -36,6 +36,9 @@ describe("App", () => {
         timestamp_sec: 755,
         claim_type_hint: "factual",
         context: "Discussing the tech job market.",
+        // The upload date is only an upper bound; the clip showed no date of its own.
+        statement_date: null,
+        video_published_date: "2024-05-01",
       }),
       expect.any(Function),
       expect.any(AbortSignal),
@@ -117,7 +120,12 @@ describe("App", () => {
     expect(submit).toBeDisabled();
     await user.type(textarea, "The Great Wall is visible from the Moon.{Control>}{Enter}{/Control}");
     await screen.findByRole("heading", { name: "Contradicted" });
-    expect(verifyClaim.mock.calls[0]?.[0]).toMatchObject({ claim: "The Great Wall is visible from the Moon.", video_id: null, context: null });
+    expect(verifyClaim.mock.calls[0]?.[0]).toMatchObject({
+      claim: "The Great Wall is visible from the Moon.",
+      video_id: null,
+      context: null,
+      statement_date: null,
+    });
   });
 
   it("shows a retryable verification error and retries with the same claim", async () => {
@@ -132,7 +140,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /check this claim/i }));
 
     const alert = await screen.findByRole("alert");
-    expect(within(alert).getByText(/did not respond in time/i)).toBeInTheDocument();
+    expect(within(alert).getByText("The AI service is busy or did not respond in time. Your claim is saved. Please try again.")).toBeInTheDocument();
     await user.click(within(alert).getByRole("button", { name: /try again/i }));
     await screen.findByRole("heading", { name: "Contradicted" });
     expect(verifyClaim).toHaveBeenCalledTimes(2);

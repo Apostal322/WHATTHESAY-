@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 
 from app.core.cache import TTLCache
 from app.core.config import Settings
@@ -13,12 +14,16 @@ from app.models.schemas import ExtractRequest, ExtractResponse, TimeWindow, Toke
 from app.services.llm import LLMClient, VideoClip
 from app.services.prompts import EXTRACTION_SYSTEM, extraction_prompt
 from app.services.structured import clip, parse_model_json, to_token_usage
+from app.services.temporal import earliest, valid_partial_date
 from app.services.youtube import canonical_watch_url, parse_video_id
 
 log = logging.getLogger(__name__)
 
 # Clicks within the same few seconds should hit the cache.
 _CACHE_BUCKET_SEC = 3
+# Bump when the extraction prompt changes what a cached extraction would say.
+EXTRACTION_PROMPT_VERSION = "2026-10-19.2"
+FALLBACK_CACHE_TTL_SEC = 300
 
 
 def compute_window(
@@ -54,7 +59,11 @@ class ExtractionService:
         )
 
         bucket = int(req.timestamp_sec) // _CACHE_BUCKET_SEC
-        cache_key = f"{video_id}:{bucket}:{req.language}:{s.extraction_model}"
+        # Everything that decides what the model sees: the video, the moment, how the clip is cut.
+        cache_key = (
+            f"{video_id}:{bucket}:{req.language}:{s.extraction_model}:{s.window_before_sec}-"
+            f"{s.window_after_sec}:{s.video_fps}:{s.video_media_resolution}:{EXTRACTION_PROMPT_VERSION}"
+        )
         if self._cache is not None and (hit := self._cache.get(cache_key)) is not None:
             log.info("extract_cache_hit", extra={"video_id": video_id})
             return hit.model_copy(update={"cached": True, "latency_ms": 0})
@@ -113,8 +122,18 @@ class ExtractionService:
             },
         )
         if self._cache is not None:
-            self._cache.set(cache_key, response)
+            # A fallback model's answer is kept briefly: the configured model is retried soon.
+            ttl = FALLBACK_CACHE_TTL_SEC if result.model != s.extraction_model else None
+            self._cache.set(cache_key, response, ttl_sec=ttl)
         return response
+
+
+def _statement_date(value: str | None) -> str | None:
+    """The model's date, only if well formed, real and not in the future."""
+    v = (value or "").strip()
+    if not v or not valid_partial_date(v) or earliest(v) > date.today():
+        return None
+    return v
 
 
 def build_extract_response(
@@ -132,6 +151,7 @@ def build_extract_response(
     evidence = clip(out.evidence_from_video, 1500)
     # A quote flag without quote text is meaningless; never claim verbatim by default.
     is_exact = bool(out.is_exact_quote and evidence)
+    said_on = _statement_date(out.statement_date)
 
     if not found:
         return ExtractResponse(
@@ -163,6 +183,8 @@ def build_extract_response(
         evidence_from_video=evidence,
         is_exact_quote=is_exact,
         language=clip(out.language, 10),
+        statement_date=said_on,
+        statement_date_evidence=clip(out.statement_date_evidence, 300) if said_on else None,
         model=model,
         latency_ms=latency_ms,
         usage=usage,
