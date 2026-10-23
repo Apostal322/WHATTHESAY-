@@ -131,8 +131,9 @@ Details: `docs/quality/defects.md`.
 ## L. What the owner needs to do
 
 1. Create a new Gemini key in Google AI Studio and put it in `.env` (never on a command line).
-2. Clone `feat/functional-beta`, set up as in `docs/windows-local-validation.md` steps 1–2, run
+2. Clone `feat/functional-beta` (or `main` once PR #14 is merged), set up as in
+   [Windows local validation](../windows-local-validation.md) steps 1–2, run
    `python scripts\diagnose_env.py` and check `gemini_key_is_the_exposed_one: false`.
-3. Run `docs/beta-validation-windows.md` step 2: P5, then P2, each with `--plan` first
-   (`"warnings": []`). Then review the sheets (step 3). That is the first E3 and E4 attempt,
-   within 8 calls and about $1.
+3. Run [the owner procedure](../beta-validation-windows.md) step 2: P5, then P2, each with
+   `--plan` first (`"warnings": []`). Then review the sheets (step 3). That is the first E3 and
+   E4 attempt, within 8 calls and about $1.

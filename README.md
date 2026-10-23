@@ -432,6 +432,7 @@ docs/           architecture, API, development, evaluation, security, validation
 | [Annotation guide](docs/annotation-guide.md) | Turning real video moments into human-verified evaluation labels |
 | [Quality audit](docs/quality/README.md) | Quality matrix (PASS / FAIL / BLOCKED per requirement), defect register, release readiness, DevOps handoff, store checklist |
 | [Live validation report](docs/live-validation-report.md) | Every live run, failure diagnosis, audit findings, the attribution safeguard |
+| [Real-world validation 001](docs/experiments/real-world-validation-001.md) | First reproducible live-experiment attempt (debate case P2/P5): blocked by credentials, level E0, what the owner must do next |
 | [Feasibility study](docs/feasibility.md) | Timestamp-based extraction with Gemini: risks and measurements |
 | [Security and privacy](docs/security-privacy.md) | Data flow, threat model, public-beta blockers |
 | [Windows local validation](docs/windows-local-validation.md) | Step-by-step Windows setup, safe key entry, evidence capture |
